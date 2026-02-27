@@ -1,14 +1,14 @@
 /**
- * Builtin Tools - 内置工具�?
+ * Builtin Tools - 内置工具集
  *
- * 提供完整的文件操作、搜索、管理和网络请求能力�?
- * 所有文件操作限制在 data 目录内�?
+ * 提供完整的文件操作、搜索、管理和网络请求能力。
+ * 所有文件操作限制在 data 目录内。
  *
- * 目录说明�?
- * - data/: 数据目录，用于存放项目文件、代码仓库、技能等（可通过 Docker 挂载�?
+ * 目录说明：
+ * - data/: 数据目录，用于存放项目文件、代码仓库、技能等（可通过 Docker 挂载）
  *
- * 环境变量�?
- * - DATA_ROOT: 自定�?data 目录路径（默认为 ./data�?
+ * 环境变量：
+ * - DATA_ROOT: 自定义 data 目录路径（默认为 ./data）
  */
 
 import fs from 'fs';
@@ -19,26 +19,15 @@ import https from 'https';
 import { URL } from 'url';
 import { fileURLToPath } from 'url';
 import AdmZip from 'adm-zip';
-import skillManager from './skill-manager.js';
 
 // 获取项目根目录（从当前模块位置向上查找）
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..'); // tools/builtin -> tools -> project_root
 
-// 允许访问的根目录列表（只允许 data 目录，避�?AI 搞混当前目录�?
-// 解析 DATA_BASE_PATH（支持相对路径和绝对路径）
-function resolveDataBasePath() {
-  const basePath = process.env.DATA_BASE_PATH || './data';
-  if (path.isAbsolute(basePath)) {
-    return basePath;
-  }
-  return path.resolve(PROJECT_ROOT, basePath);
-}
-
 // 允许访问的根目录列表（只允许 data 目录，避免 AI 搞混当前目录）
 const ALLOWED_ROOTS = [
-  resolveDataBasePath(),
+  process.env.DATA_ROOT || path.join(PROJECT_ROOT, 'data'),
 ];
 
 // 默认配置
@@ -50,12 +39,12 @@ const DEFAULTS = {
   maxResponseSize: 1000000, // 1MB
 };
 
-// 危险命令黑名�?
+// 危险命令黑名单
 const DANGEROUS_COMMANDS = [
   /^rm\s+-rf\s+\//,           // rm -rf /
   /^rm\s+-rf\s+~/,            // rm -rf ~
   /^:\(\)\{\s*:\|:\s*&\s*\};\s*:/, // fork bomb
-  /^mkfs/,                     // 格式�?
+  /^mkfs/,                     // 格式化
   /^dd\s+if=/,                // dd 写入
   /^shutdown/,                 // 关机
   /^reboot/,                   // 重启
@@ -64,8 +53,8 @@ const DANGEROUS_COMMANDS = [
 ];
 
 /**
- * 安全路径检�?
- * 确保路径在允许的目录内（data 目录�?
+ * 安全路径检查
+ * 确保路径在允许的目录内（data 目录）
  * @param {string} targetPath - 目标路径（可以是相对路径或绝对路径）
  * @returns {string} 解析后的绝对路径
  */
@@ -75,11 +64,11 @@ function safePath(targetPath) {
     ? path.resolve(targetPath)
     : null;
   
-  // 如果是相对路径，分阶段解�?
+  // 如果是相对路径，分阶段解析
   if (!resolved) {
     const normalizedTarget = targetPath.replace(/[/\\]$/, ''); // 移除末尾斜杠
     
-    // 阶段1：首先检查所有根目录�?basename（精确匹配）
+    // 阶段1：首先检查所有根目录的 basename（精确匹配）
     for (const root of ALLOWED_ROOTS) {
       const rootBasename = path.basename(root);
       if (normalizedTarget === rootBasename) {
@@ -88,7 +77,7 @@ function safePath(targetPath) {
       }
     }
     
-    // 阶段2：检查是否以某个根目录名称开头（�?"skills/subdir" �?"work/tmp"�?
+    // 阶段2：检查是否以某个根目录名称开头（如 "skills/subdir" 或 "work/tmp"）
     if (!resolved) {
       for (const root of ALLOWED_ROOTS) {
         const rootBasename = path.basename(root);
@@ -102,7 +91,7 @@ function safePath(targetPath) {
     
     // 阶段3：在根目录下解析相对路径（仅当路径不包含任何根目录名时）
     if (!resolved) {
-      // 检查路径是否包含任何根目录�?
+      // 检查路径是否包含任何根目录名
       const containsRootName = ALLOWED_ROOTS.some(root => {
         const rootBasename = path.basename(root);
         return normalizedTarget === rootBasename ||
@@ -110,7 +99,7 @@ function safePath(targetPath) {
                normalizedTarget.startsWith(rootBasename + '\\');
       });
       
-      // 如果不包含根目录名，在第一个根目录下解�?
+      // 如果不包含根目录名，在第一个根目录下解析
       if (!containsRootName) {
         const tryPath = path.resolve(ALLOWED_ROOTS[0], targetPath);
         const normalizedRoot = path.resolve(ALLOWED_ROOTS[0]);
@@ -132,12 +121,12 @@ function safePath(targetPath) {
   }
   
   // 提供更友好的错误信息
-  const allowedDirs = ALLOWED_ROOTS.map(r => path.basename(r)).join(' �?');
+  const allowedDirs = ALLOWED_ROOTS.map(r => path.basename(r)).join(' 或 ');
   throw new Error(`Path access denied: ${targetPath} is outside allowed directories (${allowedDirs})`);
 }
 
 /**
- * 检查危险命�?
+ * 检查危险命令
  */
 function isDangerousCommand(command) {
   const cmd = command.trim().toLowerCase();
@@ -146,7 +135,7 @@ function isDangerousCommand(command) {
 
 export default {
   name: 'builtin',
-  description: '系统内置工具集：文件读写、搜索、管理、网络请�?,
+  description: '系统内置工具集：文件读写、搜索、管理、网络请求',
 
   /**
    * 定义工具清单
@@ -158,7 +147,7 @@ export default {
         type: 'function',
         function: {
           name: 'get_env_info',
-          description: '获取当前环境信息，包括允许访问的目录路径、当前工作目录等。当需要知道可以访问哪些目录时使用此工具�?,
+          description: '获取当前环境信息，包括允许访问的目录路径、当前工作目录等。当需要知道可以访问哪些目录时使用此工具。',
           parameters: {
             type: 'object',
             properties: {},
@@ -166,18 +155,18 @@ export default {
           }
         }
       },
-      // 技能检�?
+      // 技能检索
       {
         type: 'function',
         function: {
           name: 'list_skills',
-          description: '检索当前专家可用的外部技能列表。通过 expert_skills 表关联查询当前专家已启用的技能，返回技能名称、描述、工具列表等信息�?,
+          description: '检索当前专家可用的外部技能列表。通过 expert_skills 表关联查询当前专家已启用的技能，返回技能名称、描述、工具列表等信息。',
           parameters: {
             type: 'object',
             properties: {
               include_tools: {
                 type: 'boolean',
-                description: '是否包含每个技能的工具列表（skill_tools 表），默�?true',
+                description: '是否包含每个技能的工具列表（skill_tools 表），默认 true',
                 default: true
               }
             },
@@ -185,18 +174,18 @@ export default {
           }
         }
       },
-      // 读取�?
+      // 读取类
       {
         type: 'function',
         function: {
           name: 'read_lines',
-          description: '按行读取文件内容，默认读�?00行。路径相对于 data 目录，也可以使用绝对路径',
+          description: '按行读取文件内容，默认读取100行。路径相对于 data 目录，也可以使用绝对路径',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '文件路径（data 目录下的相对路径，或绝对路径�? },
+              path: { type: 'string', description: '文件路径（data 目录下的相对路径，或绝对路径）' },
               start: { type: 'number', description: '起始行（0-based），默认0', default: 0 },
-              count: { type: 'number', description: '读取行数，默�?00', default: DEFAULTS.readLinesCount }
+              count: { type: 'number', description: '读取行数，默认100', default: DEFAULTS.readLinesCount }
             },
             required: ['path']
           }
@@ -211,7 +200,7 @@ export default {
             type: 'object',
             properties: {
               path: { type: 'string', description: '文件路径' },
-              start: { type: 'number', description: '起始字节，默�?', default: 0 },
+              start: { type: 'number', description: '起始字节，默认0', default: 0 },
               count: { type: 'number', description: '读取字节数，默认50000', default: DEFAULTS.readBytesCount }
             },
             required: ['path']
@@ -226,15 +215,15 @@ export default {
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '目录路径（data 目录下的相对路径，或绝对路径�? },
+              path: { type: 'string', description: '目录路径（data 目录下的相对路径，或绝对路径）' },
               recursive: { type: 'boolean', description: '是否递归列出', default: false },
-              pattern: { type: 'string', description: '文件过滤模式（如 *.js�? }
+              pattern: { type: 'string', description: '文件过滤模式（如 *.js）' }
             },
             required: ['path']
           }
         }
       },
-      // 写入�?
+      // 写入类
       {
         type: 'function',
         function: {
@@ -254,7 +243,7 @@ export default {
         type: 'function',
         function: {
           name: 'append_file',
-          description: '追加内容到文件末�?,
+          description: '追加内容到文件末尾',
           parameters: {
             type: 'object',
             properties: {
@@ -265,7 +254,7 @@ export default {
           }
         }
       },
-      // 编辑�?
+      // 编辑类
       {
         type: 'function',
         function: {
@@ -287,7 +276,7 @@ export default {
         type: 'function',
         function: {
           name: 'insert_at_line',
-          description: '在指定行后插入内�?,
+          description: '在指定行后插入内容',
           parameters: {
             type: 'object',
             properties: {
@@ -303,31 +292,31 @@ export default {
         type: 'function',
         function: {
           name: 'delete_lines',
-          description: '删除指定�?,
+          description: '删除指定行',
           parameters: {
             type: 'object',
             properties: {
               path: { type: 'string', description: '文件路径' },
-              start: { type: 'number', description: '起始行（0-based�? },
+              start: { type: 'number', description: '起始行（0-based）' },
               count: { type: 'number', description: '删除行数', default: 1 }
             },
             required: ['path', 'start']
           }
         }
       },
-      // 搜索�?
+      // 搜索类
       {
         type: 'function',
         function: {
           name: 'search_in_file',
-          description: '在【本地文件】中搜索文本内容（带上下文）。注意：此工具只能搜索本地文件系统中的文件，不能搜索网页或URL。如需获取网页内容，请使用 http_get 工具�?,
+          description: '在文件中搜索（带上下文）',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '本地文件或目录路径（data 目录下的相对路径，或绝对路径）。不支持 URL�? },
-              pattern: { type: 'string', description: '搜索模式（正则表达式�? },
-              filePattern: { type: 'string', description: '文件过滤（如 *.js�? },
-              contextLines: { type: 'number', description: '上下文行�?, default: 2 }
+              path: { type: 'string', description: '搜索路径' },
+              pattern: { type: 'string', description: '搜索模式（正则表达式）' },
+              filePattern: { type: 'string', description: '文件过滤（如 *.js）' },
+              contextLines: { type: 'number', description: '上下文行数', default: 2 }
             },
             required: ['path', 'pattern']
           }
@@ -337,20 +326,20 @@ export default {
         type: 'function',
         function: {
           name: 'grep',
-          description: '在【本地文件】中跨文件正则搜索。注意：此工具只能搜索本地文件系统中的文件，不能搜索网页或URL。如需获取网页内容，请使用 http_get 工具�?,
+          description: '跨文件正则搜索',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '本地目录路径（data 目录下的相对路径，或绝对路径）。不支持 URL�? },
+              path: { type: 'string', description: '搜索路径' },
               pattern: { type: 'string', description: '正则模式' },
-              filePattern: { type: 'string', description: '文件过滤（如 *.{js,ts}�? },
-              ignoreCase: { type: 'boolean', description: '忽略大小�?, default: false }
+              filePattern: { type: 'string', description: '文件过滤（如 *.{js,ts}）' },
+              ignoreCase: { type: 'boolean', description: '忽略大小写', default: false }
             },
             required: ['path', 'pattern']
           }
         }
       },
-      // 管理�?
+      // 管理类
       {
         type: 'function',
         function: {
@@ -359,7 +348,7 @@ export default {
           parameters: {
             type: 'object',
             properties: {
-              source: { type: 'string', description: '源文件路�? },
+              source: { type: 'string', description: '源文件路径' },
               dest: { type: 'string', description: '目标路径' }
             },
             required: ['source', 'dest']
@@ -374,7 +363,7 @@ export default {
           parameters: {
             type: 'object',
             properties: {
-              source: { type: 'string', description: '源文件路�? },
+              source: { type: 'string', description: '源文件路径' },
               dest: { type: 'string', description: '目标路径' }
             },
             required: ['source', 'dest']
@@ -385,11 +374,11 @@ export default {
         type: 'function',
         function: {
           name: 'delete_file',
-          description: '删除文件或目�?,
+          description: '删除文件或目录',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '文件或目录路�? }
+              path: { type: 'string', description: '文件或目录路径' }
             },
             required: ['path']
           }
@@ -399,7 +388,7 @@ export default {
         type: 'function',
         function: {
           name: 'create_dir',
-          description: '创建目录（递归创建�?,
+          description: '创建目录（递归创建）',
           parameters: {
             type: 'object',
             properties: {
@@ -409,12 +398,12 @@ export default {
           }
         }
       },
-      // 压缩�?
+      // 压缩类
       {
         type: 'function',
         function: {
           name: 'zip',
-          description: '创建ZIP压缩�?,
+          description: '创建ZIP压缩包',
           parameters: {
             type: 'object',
             properties: {
@@ -436,13 +425,13 @@ export default {
             properties: {
               source: { type: 'string', description: 'ZIP文件路径' },
               dest: { type: 'string', description: '解压目标目录' },
-              overwrite: { type: 'boolean', description: '覆盖已存在文�?, default: false }
+              overwrite: { type: 'boolean', description: '覆盖已存在文件', default: false }
             },
             required: ['source', 'dest']
           }
         }
       },
-      // 执行�?
+      // 执行类
       {
         type: 'function',
         function: {
@@ -451,7 +440,7 @@ export default {
           parameters: {
             type: 'object',
             properties: {
-              command: { type: 'string', description: '命令或脚本路�? },
+              command: { type: 'string', description: '命令或脚本路径' },
               args: { type: 'array', items: { type: 'string' }, description: '命令参数' },
               timeout: { type: 'number', description: '超时（毫秒）', default: DEFAULTS.executeTimeout },
               cwd: { type: 'string', description: '工作目录' }
@@ -460,7 +449,7 @@ export default {
           }
         }
       },
-      // 网络�?
+      // 网络类
       {
         type: 'function',
         function: {
@@ -470,7 +459,7 @@ export default {
             type: 'object',
             properties: {
               url: { type: 'string', description: '请求URL' },
-              headers: { type: 'object', description: '请求�? },
+              headers: { type: 'object', description: '请求头' },
               timeout: { type: 'number', description: '超时（毫秒）', default: DEFAULTS.httpTimeout }
             },
             required: ['url']
@@ -486,16 +475,14 @@ export default {
             type: 'object',
             properties: {
               url: { type: 'string', description: '请求URL' },
-              body: { description: '请求体（对象或字符串�? },
-              headers: { type: 'object', description: '请求�? },
+              body: { description: '请求体（对象或字符串）' },
+              headers: { type: 'object', description: '请求头' },
               timeout: { type: 'number', description: '超时（毫秒）', default: DEFAULTS.httpTimeout }
             },
             required: ['url']
           }
         }
-      },
-      // 技能管理工具（仅 skill-studio 专家可用）
-      ...skillManager.getTools()
+      }
     ];
   },
 
@@ -509,11 +496,11 @@ export default {
         case 'get_env_info':
           return await this.getEnvInfo(params);
         
-        // 技能检�?
+        // 技能检索
         case 'list_skills':
           return await this.listSkills(params, context);
         
-        // 读取�?
+        // 读取类
         case 'read_lines':
           return await this.readLines(params);
         case 'read_bytes':
@@ -521,13 +508,13 @@ export default {
         case 'list_files':
           return await this.listFiles(params);
         
-        // 写入�?
+        // 写入类
         case 'write_file':
           return await this.writeFile(params);
         case 'append_file':
           return await this.appendFile(params);
         
-        // 编辑�?
+        // 编辑类
         case 'replace_in_file':
           return await this.replaceInFile(params);
         case 'insert_at_line':
@@ -535,13 +522,13 @@ export default {
         case 'delete_lines':
           return await this.deleteLines(params);
         
-        // 搜索�?
+        // 搜索类
         case 'search_in_file':
           return await this.searchInFile(params);
         case 'grep':
           return await this.grep(params);
         
-        // 管理�?
+        // 管理类
         case 'copy_file':
           return await this.copyFile(params);
         case 'move_file':
@@ -551,31 +538,21 @@ export default {
         case 'create_dir':
           return await this.createDir(params);
         
-        // 压缩�?
+        // 压缩类
         case 'zip':
           return await this.zipFiles(params);
         case 'unzip':
           return await this.unzipFiles(params);
         
-        // 执行�?
+        // 执行类
         case 'execute':
           return await this.executeCommand(params);
         
-        // 网络�?
+        // 网络类
         case 'http_get':
           return await this.httpGet(params);
         case 'http_post':
           return await this.httpPost(params);
-        
-        // 技能管理工具
-        case 'register_skill':
-        case 'list_all_skills':
-        case 'get_skill_detail':
-        case 'assign_skill_to_expert':
-        case 'unassign_skill_from_expert':
-        case 'toggle_skill':
-        case 'delete_skill':
-          return await skillManager.execute(toolName, params, context);
         
         default:
           return { success: false, error: `Unknown tool: ${toolName}` };
@@ -601,14 +578,14 @@ export default {
     };
   },
 
-  // ==================== 技能检�?====================
+  // ==================== 技能检索 ====================
 
   /**
-   * 检索当前专家可用的外部技能列�?
-   * �?expert_skills 表关�?skills 表和 skill_tools 表获取数�?
+   * 检索当前专家可用的外部技能列表
+   * 从 expert_skills 表关联 skills 表和 skill_tools 表获取数据
    * @param {object} params - 参数
-   * @param {boolean} params.include_tools - 是否包含工具列表，默�?true
-   * @param {object} context - 上下文，包含 db 实例�?expert_id
+   * @param {boolean} params.include_tools - 是否包含工具列表，默认 true
+   * @param {object} context - 上下文，包含 db 实例和 expert_id
    */
   async listSkills(params, context) {
     const { include_tools = true } = params;
@@ -643,13 +620,13 @@ export default {
         [expertId]
       );
 
-      // 2. 如果需要工具列表，查询 skill_tools �?
+      // 2. 如果需要工具列表，查询 skill_tools 表
       let skillTools = [];
       if (include_tools && skills.length > 0) {
         const skillIds = skills.map(s => s.id);
         const placeholders = skillIds.map(() => '?').join(',');
         skillTools = await db.query(
-          `SELECT id, skill_id, name, description, type, \`parameters\`, command, endpoint, method, created_at
+          `SELECT id, skill_id, name, description, type, \`usage\`, command, endpoint, method, created_at
            FROM skill_tools
            WHERE skill_id IN (${placeholders})`,
           skillIds
@@ -680,7 +657,7 @@ export default {
               name: t.name,
               description: t.description,
               type: t.type,
-              parameters: t.parameters ? (typeof t.parameters === 'string' ? JSON.parse(t.parameters) : t.parameters) : null,
+              usage: t.usage ? (typeof t.usage === 'string' ? JSON.parse(t.usage) : t.usage) : null,
               command: t.command,
               endpoint: t.endpoint,
               method: t.method,
@@ -705,7 +682,7 @@ export default {
     }
   },
 
-  // ==================== 读取�?====================
+  // ==================== 读取类 ====================
 
   async readLines(params) {
     const { path: filePath, start = 0, count = DEFAULTS.readLinesCount } = params;
@@ -797,7 +774,7 @@ export default {
     return { success: true, files: results };
   },
 
-  // ==================== 写入�?====================
+  // ==================== 写入类 ====================
 
   async writeFile(params) {
     const { path: filePath, content } = params;
@@ -830,7 +807,7 @@ export default {
     return { success: true, appendedSize: afterSize - beforeSize };
   },
 
-  // ==================== 编辑�?====================
+  // ==================== 编辑类 ====================
 
   async replaceInFile(params) {
     const { path: filePath, search, replace, replaceAll = false } = params;
@@ -873,7 +850,7 @@ export default {
     const fileContent = fs.readFileSync(fullPath, 'utf-8');
     const lines = fileContent.split('\n');
     
-    // 在指定行后插�?
+    // 在指定行后插入
     const insertIndex = Math.min(Math.max(0, line), lines.length);
     lines.splice(insertIndex, 0, content);
     
@@ -901,26 +878,10 @@ export default {
     return { success: true, deletedLines: deletedCount };
   },
 
-  // ==================== 搜索�?====================
-
-  /**
-   * 检测是否为 URL
-   */
-  _isUrl(path) {
-    return /^https?:\/\//i.test(path);
-  },
+  // ==================== 搜索类 ====================
 
   async searchInFile(params) {
     const { path: searchPath, pattern, filePattern, contextLines = 2 } = params;
-    
-    // 检测是否为 URL
-    if (this._isUrl(searchPath)) {
-      return {
-        success: false,
-        error: `search_in_file 工具不支�?URL。如需获取网页内容，请使用 http_get 工具。收�?URL: ${searchPath}`
-      };
-    }
-    
     const fullPath = safePath(searchPath);
     const regex = new RegExp(pattern, 'g');
     const fileRegex = filePattern ? 
@@ -950,7 +911,7 @@ export default {
           });
         }
         
-        // 重置正则�?lastIndex
+        // 重置正则的 lastIndex
         regex.lastIndex = 0;
       }
     }
@@ -980,15 +941,6 @@ export default {
 
   async grep(params) {
     const { path: searchPath, pattern, filePattern, ignoreCase = false } = params;
-    
-    // 检测是否为 URL
-    if (this._isUrl(searchPath)) {
-      return {
-        success: false,
-        error: `grep 工具不支�?URL。如需获取网页内容，请使用 http_get 工具。收�?URL: ${searchPath}`
-      };
-    }
-    
     const fullPath = safePath(searchPath);
     const flags = ignoreCase ? 'gi' : 'g';
     const regex = new RegExp(pattern, flags);
@@ -1041,7 +993,7 @@ export default {
     return { success: true, matches };
   },
 
-  // ==================== 管理�?====================
+  // ==================== 管理类 ====================
 
   async copyFile(params) {
     const { source, dest } = params;
@@ -1111,7 +1063,7 @@ export default {
     return { success: true, path: dirPath };
   },
 
-  // ==================== 压缩�?====================
+  // ==================== 压缩类 ====================
 
   async zipFiles(params) {
     const { source, dest, recursive = true } = params;
@@ -1127,7 +1079,7 @@ export default {
     
     if (fs.statSync(sourcePath).isDirectory()) {
       zip.addLocalFolder(sourcePath, path.basename(sourcePath));
-      // 计算文件�?
+      // 计算文件数
       const entries = zip.getEntries();
       filesCount = entries.length;
     } else {
@@ -1178,17 +1130,17 @@ export default {
     };
   },
 
-  // ==================== 执行�?====================
+  // ==================== 执行类 ====================
 
   async executeCommand(params) {
     const { command, args = [], timeout = DEFAULTS.executeTimeout, cwd } = params;
     
-    // 检查危险命�?
+    // 检查危险命令
     if (isDangerousCommand(command)) {
       return { success: false, error: `Dangerous command blocked: ${command}` };
     }
     
-    // 默认使用第一个允许的根目录（skills）作为工作目�?
+    // 默认使用第一个允许的根目录（skills）作为工作目录
     const workDir = cwd ? safePath(cwd) : ALLOWED_ROOTS[0];
     
     return new Promise((resolve) => {
@@ -1251,7 +1203,7 @@ export default {
     });
   },
 
-  // ==================== 网络�?====================
+  // ==================== 网络类 ====================
 
   async httpGet(params) {
     const { url, headers = {}, timeout = DEFAULTS.httpTimeout } = params;
