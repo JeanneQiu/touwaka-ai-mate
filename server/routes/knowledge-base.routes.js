@@ -70,5 +70,13 @@ export default (controller) => {
   // 删除知识点
   router.delete('/:kb_id/knowledges/:knowledge_id/points/:id', authenticate(), controller.deletePoint.bind(controller));
 
+  // ==================== 向量化相关路由 ====================
+
+  // 获取知识点（包含 embedding）
+  router.get('/:kb_id/points/:id', authenticate(), controller.getPointWithEmbedding.bind(controller));
+
+  // 获取未向量化的知识点列表
+  router.get('/:kb_id/points-without-embedding', authenticate(), controller.getPointsWithoutEmbedding.bind(controller));
+
   return router;
 };

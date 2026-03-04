@@ -22,7 +22,19 @@
 - [x] 创建知识库路由 `knowledge-base.routes.js`
 - [x] 注册路由到服务器
 
-### Phase 3: 文档导入技能 ⏳ 待开始
+### Phase 3: 文档导入技能 ✅ 已完成
+
+**完成日期**：2026-03-04
+
+**实现内容**：
+- [x] 创建知识库技能 `data/skills/knowledge-base`
+- [x] 实现 `kb-list`、`kb-get`、`kb-create` 工具
+- [x] 实现 `kb-import-file` 文档导入工具
+- [x] 实现 `kb-import-web` 网页导入工具
+- [x] 实现 `kb-chunk-text` 文本分块工具
+- [x] 实现 `kb-embed` 向量化工具
+- [x] 实现 `kb-search-vector` 向量检索工具
+- [x] 扩展后端 API 支持向量更新
 
 ### Phase 4: 向量检索 ⏳ 待开始
 
@@ -31,6 +43,82 @@
 ---
 
 ## Code Review 记录
+
+### 2026-03-04: Phase 3 - 知识库技能实现
+
+**实现内容**：创建知识库管理技能
+
+**代码位置**：`data/skills/knowledge-base/`
+
+**文件结构**：
+
+```
+data/skills/knowledge-base/
+├── SKILL.md        # 技能定义文档
+└── index.js        # 技能实现
+```
+
+**工具列表**：
+
+| 工具名 | 功能 | 状态 |
+|--------|------|------|
+| `kb-list` | 获取知识库列表 | ✅ |
+| `kb-get` | 获取知识库详情 | ✅ |
+| `kb-create` | 创建知识库 | ✅ |
+| `kb-import-file` | 导入文件到知识库 | ✅ |
+| `kb-import-web` | 导入网页内容 | ✅ |
+| `kb-chunk-text` | 文本智能分块 | ✅ |
+| `kb-create-point` | 创建知识点 | ✅ |
+| `kb-embed` | 生成向量嵌入 | ✅ |
+| `kb-search-vector` | 向量语义检索 | ✅ |
+| `kb-get-point` | 获取知识点详情 | ✅ |
+| `kb-get-knowledge` | 获取文章详情 | ✅ |
+
+**后端 API 扩展**：
+
+| 新增路由 | 功能 |
+|----------|------|
+| `GET /api/kb/:kb_id/points/:id` | 获取知识点（含 embedding） |
+| `GET /api/kb/:kb_id/points-without-embedding` | 获取未向量化知识点 |
+| `PUT /api/kb/:kb_id/knowledges/:knowledge_id/points/:id` | 支持更新 embedding |
+
+**设计亮点**：
+
+1. **智能分块**：`chunkText()` 按段落分割，支持重叠，自动处理大段落
+2. **Token 估算**：区分中英文，准确估算 token 数量
+3. **向量存储**：使用 BLOB 存储 JSON 序列化的向量
+4. **相似度计算**：实现余弦相似度算法
+5. **API 集成**：通过 HTTP 调用后端 API，支持认证
+
+**代码质量**：
+
+| 项目 | 评价 | 说明 |
+|------|------|------|
+| 文件解析 | ✅ | 支持 .md, .txt, .html 直接解析 |
+| PDF/DOCX | ⚠️ | 需要调用对应的 PDF/DOCX 技能 |
+| 错误处理 | ✅ | 所有工具都有完善的错误处理 |
+| 文件验证 | ✅ | 检查文件大小、类型 |
+| 参数验证 | ✅ | 检查必填参数 |
+
+**配置说明**：
+
+```javascript
+// 环境变量配置
+EMBEDDING_API_URL   // Embedding API 地址
+EMBEDDING_API_KEY   // API 密钥
+EMBEDDING_MODEL     // 模型名称（默认 text-embedding-3-small）
+KB_API_BASE         // 后端 API 地址（默认 http://localhost:3000/api）
+```
+
+**待优化项**：
+
+| 问题 | 严重程度 | 建议 |
+|------|----------|------|
+| 向量检索性能 | 中 | 数据量大时应迁移到专业向量库 |
+| PDF/DOCX 解析 | 低 | 当前需要手动调用对应技能 |
+| 批量操作 | 建议 | 可添加批量创建知识点接口 |
+
+---
 
 ### 2026-03-04: 数据库迁移脚本实现
 
@@ -192,32 +280,25 @@ knowledge_point (N) ↔ (N) knowledge_point (通过 knowledge_relation)
 | `models/knowledge_point.js` | 模型 | ✅ 已创建 |
 | `models/knowledge_relation.js` | 模型 | ✅ 已创建 |
 | `models/init-models.js` | 模型配置 | ✅ 已修改 |
-| `server/controllers/knowledge-base.controller.js` | 控制器 | ✅ 已创建 |
-| `server/routes/knowledge-base.routes.js` | 路由 | ✅ 已创建 |
+| `server/controllers/knowledge-base.controller.js` | 控制器 | ✅ 已创建/修改 |
+| `server/routes/knowledge-base.routes.js` | 路由 | ✅ 已创建/修改 |
 | `server/controllers/index.js` | 导出 | ✅ 已修改 |
 | `server/routes/index.js` | 导出 | ✅ 已修改 |
 | `server/index.js` | 服务器 | ✅ 已修改 |
+| `data/skills/knowledge-base/SKILL.md` | 技能定义 | ✅ 已创建 |
+| `data/skills/knowledge-base/index.js` | 技能实现 | ✅ 已创建 |
 
 ---
 
 ## 下一步计划
 
-### Phase 3: 文档导入技能
+### Phase 4: 向量检索优化
 
 需要实现以下功能：
 
-1. **文件上传接口**：支持 PDF、Word、Markdown 等格式
-2. **文档解析技能**：提取文本、分段、生成知识点
-3. **向量生成**：调用 embedding API 生成向量
-4. **知识点存储**：保存到 `knowledge_points` 表
-
-### Phase 4: 向量检索
-
-需要实现以下功能：
-
-1. **向量搜索接口**：根据查询向量检索相似知识点
-2. **余弦相似度计算**：MySQL 实现或迁移到专业向量库
-3. **RAG 集成**：将检索结果注入到 Chat 流程
+1. **向量数据库集成**：考虑迁移到 Milvus/Qdrant
+2. **RAG 集成**：将检索结果注入到 Chat 流程
+3. **检索过滤**：多层过滤策略，提高检索精度
 
 ### Phase 5: 前端界面
 

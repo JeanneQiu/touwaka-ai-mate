@@ -721,7 +721,7 @@ class KnowledgeBaseController {
     try {
       this.ensureModels();
       const { kb_id, knowledge_id, id } = ctx.params;
-      const { title, content, context, position } = ctx.request.body;
+      const { title, content, context, position, embedding, token_count } = ctx.request.body;
 
       // 验证知识库权限
       const kb = await this.KnowledgeBase.findOne({
@@ -738,6 +738,15 @@ class KnowledgeBaseController {
       if (content !== undefined) updates.content = content;
       if (context !== undefined) updates.context = context;
       if (position !== undefined) updates.position = position;
+      if (token_count !== undefined) updates.token_count = token_count;
+      if (embedding !== undefined) {
+        // embedding 可以是数组或字符串（JSON）
+        if (Array.isArray(embedding)) {
+          updates.embedding = Buffer.from(JSON.stringify(embedding));
+        } else if (typeof embedding === 'string') {
+          updates.embedding = Buffer.from(embedding);
+        }
+      }
 
       if (Object.keys(updates).length === 0) {
         ctx.error('没有要更新的字段');
@@ -763,6 +772,98 @@ class KnowledgeBaseController {
     } catch (error) {
       logger.error('Update knowledge point error:', error);
       ctx.error('更新知识点失败', 500);
+    }
+  }
+
+  /**
+   * 获取知识点（包含 embedding）
+   */
+  async getPointWithEmbedding(ctx) {
+    try {
+      this.ensureModels();
+      const { kb_id, id } = ctx.params;
+
+      // 验证知识库权限
+      const kb = await this.KnowledgeBase.findOne({
+        where: { id: kb_id, owner_id: ctx.state.userId },
+        raw: true,
+      });
+      if (!kb) {
+        ctx.error('知识库不存在或无权限', 404);
+        return;
+      }
+
+      const point = await this.KnowledgePoint.findOne({
+        where: { id },
+        raw: true,
+      });
+
+      if (!point) {
+        ctx.error('知识点不存在', 404);
+        return;
+      }
+
+      // 解析 embedding
+      if (point.embedding) {
+        point.embedding = JSON.parse(point.embedding.toString());
+      }
+
+      ctx.success(point);
+    } catch (error) {
+      logger.error('Get knowledge point with embedding error:', error);
+      ctx.error('获取知识点失败', 500);
+    }
+  }
+
+  /**
+   * 获取未向量化的知识点列表
+   */
+  async getPointsWithoutEmbedding(ctx) {
+    try {
+      this.ensureModels();
+      const { kb_id } = ctx.params;
+      const { limit = 100 } = ctx.query;
+
+      // 验证知识库权限
+      const kb = await this.KnowledgeBase.findOne({
+        where: { id: kb_id, owner_id: ctx.state.userId },
+        raw: true,
+      });
+      if (!kb) {
+        ctx.error('知识库不存在或无权限', 404);
+        return;
+      }
+
+      // 获取知识库下的所有知识点（未向量化）
+      const { Op } = this.db.Sequelize;
+      const points = await this.KnowledgePoint.findAll({
+        where: {
+          embedding: null,
+        },
+        include: [{
+          model: this.Knowledge,
+          as: 'knowledge',
+          where: { kb_id },
+          attributes: ['id', 'title'],
+        }],
+        limit: parseInt(limit),
+        raw: true,
+      });
+
+      ctx.success({
+        items: points.map(p => ({
+          id: p.id,
+          knowledge_id: p.knowledge_id,
+          title: p.title,
+          content: p.content,
+          context: p.context,
+          knowledge_title: p['knowledge.title'],
+        })),
+        total: points.length,
+      });
+    } catch (error) {
+      logger.error('Get points without embedding error:', error);
+      ctx.error('获取未向量化知识点失败', 500);
     }
   }
 
