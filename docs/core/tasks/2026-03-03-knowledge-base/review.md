@@ -36,7 +36,16 @@
 - [x] 实现 `kb-search-vector` 向量检索工具
 - [x] 扩展后端 API 支持向量更新
 
-### Phase 4: 向量检索 ⏳ 待开始
+### Phase 4: 向量检索与 RAG 集成 ✅ 已完成
+
+**完成日期**：2026-03-04
+
+**实现内容**：
+- [x] 创建 RAG 服务 `lib/rag-service.js`
+- [x] 集成 RAG 到 ChatService
+- [x] 更新 ContextManager 支持 RAG 上下文
+- [x] 添加专家知识库配置字段 `knowledge_config`
+- [x] 创建迁移脚本 `scripts/migrate-add-knowledge-config.js`
 
 ### Phase 5: 前端界面 ⏳ 待开始
 
@@ -270,15 +279,86 @@ knowledge_point (N) ↔ (N) knowledge_point (通过 knowledge_relation)
 
 ---
 
+### 2026-03-04: Phase 4 - RAG 集成实现
+
+**实现内容**：创建 RAG 服务并集成到 Chat 流程
+
+**代码位置**：`lib/rag-service.js`
+
+**核心功能**：
+
+| 方法 | 功能 |
+|------|------|
+| `retrieve()` | RAG 检索主入口 |
+| `getTargetKbIds()` | 获取目标知识库ID列表 |
+| `generateQueryEmbedding()` | 生成查询向量 |
+| `vectorSearch()` | 向量相似度搜索 |
+| `buildContextMessage()` | 构建 RAG 上下文消息 |
+
+**ChatService 集成**：
+
+修改 `lib/chat-service.js`，在 `ExpertChatService.buildContext()` 中添加 RAG 检索：
+
+```javascript
+// RAG 检索知识库内容
+const knowledgeConfig = this.expertConfig.expert?.knowledge_config;
+if (knowledgeConfig?.enabled && this.ragService) {
+  const ragResult = await this.ragService.retrieve(currentMessage, {
+    expertId: this.expertId,
+    kbId: knowledgeConfig.kb_id,
+    topK: knowledgeConfig.top_k || 5,
+    threshold: knowledgeConfig.threshold || 0.7,
+    userId: user_id,
+  });
+  // 将检索结果注入上下文
+}
+```
+
+**ContextManager 扩展**：
+
+新增 `enhanceWithRAGContext()` 方法，将知识库检索结果注入到 System Prompt：
+
+```
+## 相关知识库内容
+以下是从知识库中检索到的相关内容，请参考这些信息回答用户问题：
+...
+```
+
+**专家配置字段**：
+
+在 `experts` 表添加 `knowledge_config` 字段（JSON 格式）：
+
+```javascript
+{
+  enabled: true,           // 是否启用知识库
+  kb_id: 1,                // 知识库ID
+  top_k: 5,                // 返回数量
+  threshold: 0.7,          // 相似度阈值
+  max_tokens: 2000,        // 最大 token 数
+  style: 'default'         // 输出风格：default, concise, detailed
+}
+```
+
+**设计亮点**：
+
+1. **自动检索**：用户提问时自动检索相关知识库内容
+2. **上下文注入**：检索结果格式化后注入到 System Prompt
+3. **可配置性**：每个专家可独立配置知识库参数
+4. **Token 控制**：支持限制 RAG 上下文的 token 数量
+
+---
+
 ## 文件清单
 
 | 文件 | 类型 | 状态 |
 |------|------|------|
 | `scripts/migrate-add-knowledge-base.js` | 迁移脚本 | ✅ 已创建 |
+| `scripts/migrate-add-knowledge-config.js` | 迁移脚本 | ✅ 已创建 |
 | `models/knowledge_base.js` | 模型 | ✅ 已修改 |
 | `models/knowledge.js` | 模型 | ✅ 已创建 |
 | `models/knowledge_point.js` | 模型 | ✅ 已创建 |
 | `models/knowledge_relation.js` | 模型 | ✅ 已创建 |
+| `models/expert.js` | 模型 | ✅ 已修改 |
 | `models/init-models.js` | 模型配置 | ✅ 已修改 |
 | `server/controllers/knowledge-base.controller.js` | 控制器 | ✅ 已创建/修改 |
 | `server/routes/knowledge-base.routes.js` | 路由 | ✅ 已创建/修改 |
@@ -287,18 +367,13 @@ knowledge_point (N) ↔ (N) knowledge_point (通过 knowledge_relation)
 | `server/index.js` | 服务器 | ✅ 已修改 |
 | `data/skills/knowledge-base/SKILL.md` | 技能定义 | ✅ 已创建 |
 | `data/skills/knowledge-base/index.js` | 技能实现 | ✅ 已创建 |
+| `lib/rag-service.js` | RAG 服务 | ✅ 已创建 |
+| `lib/chat-service.js` | Chat 服务 | ✅ 已修改 |
+| `lib/context-manager.js` | 上下文管理 | ✅ 已修改 |
 
 ---
 
 ## 下一步计划
-
-### Phase 4: 向量检索优化
-
-需要实现以下功能：
-
-1. **向量数据库集成**：考虑迁移到 Milvus/Qdrant
-2. **RAG 集成**：将检索结果注入到 Chat 流程
-3. **检索过滤**：多层过滤策略，提高检索精度
 
 ### Phase 5: 前端界面
 
@@ -308,6 +383,7 @@ knowledge_point (N) ↔ (N) knowledge_point (通过 knowledge_relation)
 2. **知识库详情页**：显示文章树和知识点
 3. **文章编辑器**：支持 Markdown 编辑和知识点管理
 4. **搜索界面**：语义搜索知识库内容
+5. **专家知识库配置**：在专家设置中配置关联的知识库
 
 ---
 
