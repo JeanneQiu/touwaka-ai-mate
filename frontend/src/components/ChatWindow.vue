@@ -90,8 +90,10 @@
         v-model="inputText"
         :placeholder="placeholderText"
         :disabled="isLoading || disabled"
-        @keydown.enter.exact.prevent="handleSend"
-        @keydown.enter.shift.exact="() => {}"
+        @keydown.enter.exact="handleEnterKey"
+        @compositionstart="isComposing = true"
+        @compositionend="isComposing = false"
+        @blur="isComposing = false"
         @input="handleInput"
         rows="1"
         class="message-input"
@@ -150,6 +152,7 @@ const { t } = useI18n()
 const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
+const isComposing = ref(false) // 中文输入法组合状态
 
 // 快捷指令列表
 const commands = [
@@ -276,6 +279,16 @@ const handleSend = () => {
   if (inputRef.value) {
     inputRef.value.style.height = 'auto'
   }
+}
+
+// 处理 Enter 键（检测输入法状态）
+const handleEnterKey = (event: KeyboardEvent) => {
+  // 检查自定义状态和原生事件属性，确保输入法组合期间不发送
+  // event.isComposing 在现代浏览器中于 IME 组合期间为 true
+  if (isComposing.value || event.isComposing) return
+
+  event.preventDefault()
+  handleSend()
 }
 
 // 停止生成
