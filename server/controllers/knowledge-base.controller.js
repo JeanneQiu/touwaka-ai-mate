@@ -10,10 +10,12 @@
  */
 
 import logger from '../../lib/logger.js';
+import { Op } from 'sequelize';
 import {
   buildQueryOptions,
   buildPaginatedResponse,
 } from '../../lib/query-builder.js';
+import { generateEmbedding, isLocalModelAvailable } from '../../lib/local-embedding.js';
 
 // 允许过滤的字段白名单
 const KB_FILTER_FIELDS = [
@@ -899,6 +901,292 @@ class KnowledgeBaseController {
       logger.error('Delete knowledge point error:', error);
       ctx.error('删除知识点失败', 500);
     }
+  }
+
+  /**
+   * 批量生成知识点嵌入向量
+   * POST /api/kb/:kb_id/embed-batch
+   */
+  async embedBatch(ctx) {
+    try {
+      this.ensureModels();
+      const { kb_id } = ctx.params;
+      const { point_ids } = ctx.request.body;
+
+      if (!Array.isArray(point_ids) || point_ids.length === 0) {
+        ctx.error('请提供知识点ID列表');
+        return;
+      }
+
+      // 限制批量处理大小，防止内存溢出
+      const MAX_BATCH_SIZE = 100;
+      if (point_ids.length > MAX_BATCH_SIZE) {
+        ctx.error(`批量处理数量超过限制（最大 ${MAX_BATCH_SIZE} 个），请分批处理`);
+        return;
+      }
+
+      // 获取知识库信息
+      const kb = await this.KnowledgeBase.findOne({
+        where: { id: kb_id, owner_id: ctx.state.userId },
+        raw: true,
+      });
+
+      if (!kb) {
+        ctx.error('知识库不存在');
+        return;
+      }
+
+      // 获取知识点
+      const points = await this.KnowledgePoint.findAll({
+        where: {
+          id: point_ids,
+        },
+        raw: true,
+      });
+
+      if (points.length === 0) {
+        ctx.error('没有找到符合条件的知识点');
+        return;
+      }
+
+      // 生成嵌入向量
+      const results = [];
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const point of points) {
+        try {
+          const text = point.content || point.title;
+          if (!text) {
+            failCount++;
+            results.push({ id: point.id, success: false, error: 'No content to embed' });
+            continue;
+          }
+
+          const embedding = await this.generateQueryEmbedding(text, kb.embedding_model_id);
+          if (embedding) {
+            await this.KnowledgePoint.update(
+              { embedding: JSON.stringify(embedding) },
+              { where: { id: point.id } }
+            );
+            successCount++;
+            results.push({ id: point.id, success: true });
+          } else {
+            failCount++;
+            results.push({ id: point.id, success: false, error: 'Failed to generate embedding' });
+          }
+        } catch (error) {
+          failCount++;
+          results.push({ id: point.id, success: false, error: error.message });
+        }
+      }
+
+      ctx.success({
+        total: point_ids.length,
+        success: successCount,
+        failed: failCount,
+        results,
+      });
+    } catch (error) {
+      logger.error('Batch embed points error:', error);
+      ctx.error('批量生成嵌入向量失败', 500);
+    }
+  }
+
+  // ==================== 搜索功能 ====================
+
+  /**
+   * 语义搜索知识点
+   * POST /api/kb/:kb_id/search
+   */
+  async search(ctx) {
+    try {
+      this.ensureModels();
+      const { kb_id } = ctx.params;
+      const { query, top_k = 5, threshold = 0.7 } = ctx.request.body;
+
+      if (!query) {
+        ctx.error('搜索查询不能为空');
+        return;
+      }
+
+      // 验证知识库权限
+      const kb = await this.KnowledgeBase.findOne({
+        where: { id: kb_id, owner_id: ctx.state.userId },
+        raw: true,
+      });
+      if (!kb) {
+        ctx.error('知识库不存在或无权限', 404);
+        return;
+      }
+
+      // 获取所有有向量的知识点（先获取知识库下的文章ID列表）
+      const knowledgeIds = await this.Knowledge.findAll({
+        where: { kb_id },
+        attributes: ['id'],
+        raw: true,
+      }).then(rows => rows.map(r => r.id));
+
+      if (knowledgeIds.length === 0) {
+        ctx.success([]);
+        return;
+      }
+
+      // 获取这些文章下的有向量的知识点
+      const points = await this.KnowledgePoint.findAll({
+        where: {
+          knowledge_id: knowledgeIds,
+          embedding: { [Op.ne]: null },
+        },
+        raw: true,
+      });
+
+      if (points.length === 0) {
+        ctx.success([]);
+        return;
+      }
+
+      // 生成查询向量
+      const queryEmbedding = await this.generateQueryEmbedding(query, kb.embedding_model_id);
+
+      if (!queryEmbedding) {
+        // 如果 embedding API 没有配置，返回空数组
+        ctx.success([]);
+        return;
+      }
+
+      // 计算相似度并排序
+      const results = points
+        .map(point => {
+          let pointEmbedding = point.embedding;
+          if (Buffer.isBuffer(pointEmbedding)) {
+            pointEmbedding = JSON.parse(pointEmbedding.toString());
+          }
+          const similarity = this.cosineSimilarity(queryEmbedding, pointEmbedding);
+          return {
+            point: {
+              id: point.id,
+              title: point.title,
+              content: point.content,
+              context: point.context,
+              token_count: point.token_count,
+            },
+            knowledge: {
+              id: point.knowledge_id,
+              title: null, // 需要单独查询获取
+            },
+            score: similarity,
+          };
+        })
+        .filter(r => r.score >= threshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, parseInt(top_k));
+
+      // 获取相关文章的标题
+      const resultKnowledgeIds = [...new Set(results.map(r => r.knowledge.id))];
+      if (resultKnowledgeIds.length > 0) {
+        const knowledges = await this.Knowledge.findAll({
+          where: { id: resultKnowledgeIds },
+          attributes: ['id', 'title'],
+          raw: true,
+        });
+        const knowledgeMap = new Map(knowledges.map(k => [k.id, k.title]));
+        results.forEach(r => {
+          r.knowledge.title = knowledgeMap.get(r.knowledge.id);
+        });
+      }
+
+      ctx.success(results);
+    } catch (error) {
+      logger.error('Search knowledge error:', error.message || error);
+      logger.error('Search knowledge error stack:', error.stack);
+      ctx.error('搜索失败: ' + (error.message || '未知错误'), 500);
+    }
+  }
+
+  /**
+   * 检查本地模型是否可用
+   */
+  isLocalModelAvailable() {
+    try {
+      return isLocalModelAvailable();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 生成查询向量
+   */
+  async generateQueryEmbedding(text, modelId) {
+    try {
+      // 如果指定使用本地模型（modelId 为 'local' 或以 'local:' 开头）
+      const useLocal = modelId === 'local' || modelId?.startsWith('local:');
+
+      if (useLocal) {
+        logger.info('[KB Search] Using local embedding model');
+        const embeddings = await generateEmbedding(text);
+        return embeddings?.[0] || null;
+      }
+
+      // 使用外部 API
+      const embeddingApiUrl = process.env.EMBEDDING_API_URL;
+      const embeddingApiKey = process.env.EMBEDDING_API_KEY;
+      const embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
+
+      if (!embeddingApiUrl || !embeddingApiKey) {
+        // 如果没有配置外部 API，尝试使用本地模型
+        if (isLocalModelAvailable()) {
+          logger.info('[KB Search] No external API configured, using local model');
+          const embeddings = await generateEmbedding(text);
+          return embeddings?.[0] || null;
+        }
+        logger.warn('[KB Search] Embedding API not configured and local model not available');
+        return null;
+      }
+
+      const response = await fetch(embeddingApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${embeddingApiKey}`,
+        },
+        body: JSON.stringify({
+          input: text,
+          model: modelId || embeddingModel,
+        }),
+      });
+
+      if (!response.ok) {
+        logger.error('[KB Search] Embedding API error:', response.status);
+        return null;
+      }
+
+      const data = await response.json();
+      return data.data?.[0]?.embedding || null;
+    } catch (error) {
+      logger.error('[KB Search] Generate embedding error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 计算余弦相似度
+   */
+  cosineSimilarity(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    normA = Math.sqrt(normA);
+    normB = Math.sqrt(normB);
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (normA * normB);
   }
 }
 

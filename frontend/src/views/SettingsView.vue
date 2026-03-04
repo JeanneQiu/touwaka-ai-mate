@@ -149,6 +149,9 @@
               >
                 <div class="model-info">
                   <span class="model-name">{{ model.name }}</span>
+                  <span v-if="(model as any).model_type === 'embedding'" class="badge embedding">
+                    {{ $t('settings.modelTypeEmbedding') }}
+                  </span>
                   <span v-if="!model.is_active" class="badge inactive">
                     {{ $t('settings.inactive') }}
                   </span>
@@ -649,6 +652,15 @@
               <option v-for="provider in providerStore.providers" :key="provider.id" :value="provider.id">
                 {{ provider.name }}
               </option>
+            </select>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.modelType') }}</label>
+            <select v-model="modelForm.model_type" class="form-input">
+              <option value="chat">{{ $t('settings.modelTypeChat') }}</option>
+              <option value="embedding">{{ $t('settings.modelTypeEmbedding') }}</option>
+              <option value="image">{{ $t('settings.modelTypeImage') }}</option>
+              <option value="audio">{{ $t('settings.modelTypeAudio') }}</option>
             </select>
           </div>
           <div class="form-item">
@@ -1499,6 +1511,7 @@ const modelForm = reactive<ModelFormData>({
   name: '',
   model_name: '',
   provider_id: '',
+  model_type: 'chat',
   max_tokens: undefined,
   cost_per_1k_input: undefined,
   cost_per_1k_output: undefined,
@@ -2105,6 +2118,7 @@ const openModelDialog = (model?: AIModel) => {
     modelForm.name = model.name
     modelForm.model_name = model.model_name || ''
     modelForm.provider_id = model.provider_id || ''
+    modelForm.model_type = (model as any).model_type || 'chat'
     modelForm.max_tokens = model.max_tokens
     modelForm.cost_per_1k_input = model.cost_per_1k_input
     modelForm.cost_per_1k_output = model.cost_per_1k_output
@@ -2116,6 +2130,7 @@ const openModelDialog = (model?: AIModel) => {
     modelForm.model_name = ''
     // 如果已选择提供商，默认使用该提供商
     modelForm.provider_id = selectedProvider.value?.id || ''
+    modelForm.model_type = 'chat'
     modelForm.max_tokens = undefined
     modelForm.cost_per_1k_input = undefined
     modelForm.cost_per_1k_output = undefined
@@ -2617,6 +2632,16 @@ onMounted(() => {
 .badge.inactive {
   background: var(--error-bg, #ffebee);
   color: var(--error-color, #c62828);
+}
+
+.badge.embedding {
+  background: var(--primary-light-bg, #e8f4fe);
+  color: var(--primary-color, #7c5c3d);
+}
+
+.badge.chat {
+  background: var(--bg-secondary, #e9ecef);
+  color: var(--text-secondary, #6c7780);
 }
 
 .btn-edit {

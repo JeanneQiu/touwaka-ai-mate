@@ -84,6 +84,16 @@
               rows="3"
             ></textarea>
           </div>
+          <div class="form-group">
+            <label class="form-label">{{ $t('knowledgeBase.embeddingModelLabel') }}</label>
+            <select v-model="formData.embedding_model_id" class="form-select">
+              <option value="">{{ $t('knowledgeBase.useBuiltinModel') }}</option>
+              <option v-for="model in embeddingModels" :key="model.id" :value="model.id">
+                {{ model.name }}
+              </option>
+            </select>
+            <p class="form-hint">{{ $t('knowledgeBase.embeddingModelHint') }}</p>
+          </div>
         </div>
         <div class="dialog-footer">
           <button class="btn-cancel" @click="closeDialog">{{ $t('common.cancel') }}</button>
@@ -135,11 +145,13 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useKnowledgeBaseStore } from '@/stores/knowledgeBase'
+import { useModelStore } from '@/stores/model'
 import type { KnowledgeBase } from '@/types'
 
 const { t } = useI18n()
 const router = useRouter()
 const kbStore = useKnowledgeBaseStore()
+const modelStore = useModelStore()
 
 // State
 const searchQuery = ref('')
@@ -150,6 +162,14 @@ const isSubmitting = ref(false)
 const formData = ref({
   name: '',
   description: '',
+  embedding_model_id: '' as string | number,
+})
+
+// 获取 embedding 模型列表
+const embeddingModels = computed(() => {
+  return modelStore.models.filter(
+    (m: any) => m.model_type === 'embedding'
+  )
 })
 
 // Context menu
@@ -197,7 +217,7 @@ const openKbDetail = (kb: KnowledgeBase) => {
 const closeDialog = () => {
   showCreateDialog.value = false
   editingKb.value = null
-  formData.value = { name: '', description: '' }
+  formData.value = { name: '', description: '', embedding_model_id: '' }
 }
 
 const submitForm = async () => {
@@ -209,11 +229,13 @@ const submitForm = async () => {
       await kbStore.updateKnowledgeBase(editingKb.value.id, {
         name: formData.value.name,
         description: formData.value.description,
+        embedding_model_id: formData.value.embedding_model_id || null,
       })
     } else {
       await kbStore.createKnowledgeBase({
         name: formData.value.name,
         description: formData.value.description,
+        embedding_model_id: formData.value.embedding_model_id || null,
       })
     }
     closeDialog()
@@ -244,6 +266,7 @@ const editKb = (kb: KnowledgeBase) => {
   formData.value = {
     name: kb.name,
     description: kb.description || '',
+    embedding_model_id: (kb as any).embedding_model_id || '',
   }
 }
 
@@ -271,6 +294,7 @@ const handleClickOutside = () => {
 // Lifecycle
 onMounted(() => {
   kbStore.loadKnowledgeBases()
+  modelStore.loadModels() // 加载模型列表
   document.addEventListener('click', handleClickOutside)
 })
 
@@ -487,6 +511,27 @@ onUnmounted(() => {
 .form-textarea {
   resize: vertical;
   min-height: 80px;
+}
+
+.form-select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: var(--primary-color, #2196f3);
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  margin-top: 4px;
 }
 
 /* Buttons */

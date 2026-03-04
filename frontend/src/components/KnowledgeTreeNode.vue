@@ -44,6 +44,7 @@
         :node="child"
         :level="level + 1"
         :selected-id="selectedId"
+        :force-expand="forceExpand"
         @select="emit('select', $event)"
         @edit="emit('edit', $event)"
         @delete="emit('delete', $event)"
@@ -71,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Knowledge } from '@/types'
 
@@ -79,6 +80,7 @@ const props = defineProps<{
   node: Knowledge
   level: number
   selectedId?: number
+  forceExpand?: boolean | null
 }>()
 
 const emit = defineEmits<{
@@ -92,6 +94,13 @@ const { t } = useI18n()
 
 // State
 const isExpanded = ref(true)
+
+// Watch for forceExpand prop changes
+watch(() => props.forceExpand, (newVal) => {
+  if (newVal !== null && newVal !== undefined) {
+    isExpanded.value = newVal
+  }
+}, { immediate: true })
 const contextMenuVisible = ref(false)
 const contextMenuX = ref(0)
 const contextMenuY = ref(0)

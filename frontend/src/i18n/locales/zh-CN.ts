@@ -270,6 +270,13 @@ export default {
     modelIdentifierHint: '调用 API 时使用的模型 ID',
     provider: '所属提供商',
     selectProvider: '选择提供商',
+    modelType: '模型类型',
+    selectModelType: '选择模型类型',
+    modelTypeChat: '对话模型',
+    modelTypeEmbedding: '向量模型',
+    modelTypeImage: '图像模型',
+    modelTypeAudio: '语音模型',
+    maxTokens: '最大 Token',
     maxTokensPlaceholder: '例如：4096',
     costPer1kInput: '每千输入 Token 成本',
     costPer1kOutput: '每千输出 Token 成本',
@@ -614,6 +621,9 @@ export default {
     namePlaceholder: '请输入知识库名称',
     descriptionLabel: '描述（可选）',
     descriptionPlaceholder: '请输入知识库描述...',
+    embeddingModelLabel: 'Embedding 模型',
+    embeddingModelHint: '选择用于生成向量嵌入的模型，如不选择则使用内置模型',
+    useBuiltinModel: '使用内置模型',
     embeddingModel: '向量模型',
     selectEmbeddingModel: '选择向量模型',
     createSuccess: '知识库创建成功',
@@ -636,8 +646,28 @@ export default {
     // 文章树
     articleTree: '文章目录',
     noArticles: '暂无文章，点击导入或新建',
+    selectArticleHint: '请从左侧选择一篇文章',
     expandAll: '全部展开',
     collapseAll: '全部收起',
+
+    // 批量嵌入
+    batchEmbed: '批量生成向量',
+    embedding: '生成向量中...',
+    noPointsToEmbed: '没有需要向量化的知识点',
+    embedSuccess: '成功生成 {count} 个向量',
+    embedFailed: '向量生成失败',
+    embedError: '向量生成出错',
+    embedCompleted: '向量生成完成',
+
+    // 批量嵌入范围选择
+    batchEmbedScope: {
+      title: '选择向量化范围',
+      hint: '请选择要向量化的知识点范围：',
+      entireKB: '整个知识库',
+      currentArticle: '指定文章',
+      selectArticle: '选择文章',
+      selectArticlePlaceholder: '请选择一篇文章',
+    },
 
     // 文章
     article: {

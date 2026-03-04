@@ -1,568 +1,534 @@
-## 实现进度
+## 知识库系统实现总结
 
-### Phase 1: 数据库表 ✅ 已完成
-
-**完成日期**：2026-03-04
-
-**实现内容**：
-- [x] 创建迁移脚本 `scripts/migrate-add-knowledge-base.js`
-- [x] 创建 `knowledge_bases` 表（知识库）
-- [x] 创建 `knowledges` 表（文章，树状结构）
-- [x] 创建 `knowledge_points` 表（知识点）
-- [x] 创建 `knowledge_relations` 表（知识点关联）
-- [x] 创建图片存储目录 `data/kb-images`
-
-### Phase 2: 后端 API ✅ 已完成
-
-**完成日期**：2026-03-04
-
-**实现内容**：
-- [x] 创建 Sequelize 模型文件
-- [x] 创建知识库控制器 `KnowledgeBaseController`
-- [x] 创建知识库路由 `knowledge-base.routes.js`
-- [x] 注册路由到服务器
-
-### Phase 3: 文档导入技能 ✅ 已完成
-
-**完成日期**：2026-03-04
-
-**实现内容**：
-- [x] 创建知识库技能 `data/skills/knowledge-base`
-- [x] 实现 `kb-list`、`kb-get`、`kb-create` 工具
-- [x] 实现 `kb-import-file` 文档导入工具
-- [x] 实现 `kb-import-web` 网页导入工具
-- [x] 实现 `kb-chunk-text` 文本分块工具
-- [x] 实现 `kb-embed` 向量化工具
-- [x] 实现 `kb-search-vector` 向量检索工具
-- [x] 扩展后端 API 支持向量更新
-
-### Phase 4: 向量检索与 RAG 集成 ✅ 已完成
-
-**完成日期**：2026-03-04
-
-**实现内容**：
-- [x] 创建 RAG 服务 `lib/rag-service.js`
-- [x] 集成 RAG 到 ChatService
-- [x] 更新 ContextManager 支持 RAG 上下文
-- [x] 添加专家知识库配置字段 `knowledge_config`
-- [x] 创建迁移脚本 `scripts/migrate-add-knowledge-config.js`
-
-### Phase 5: 前端界面 ✅ 已完成
-
-**完成日期**：2026-03-04
-
-**实现内容**：
-
-- [x] 添加知识库类型定义 `frontend/src/types/index.ts`
-- [x] 添加知识库 API `frontend/src/api/services.ts`
-- [x] 创建知识库 Store `frontend/src/stores/knowledgeBase.ts`
-- [x] 添加 i18n 翻译（zh-CN, en-US）
-- [x] 创建知识库列表页 `frontend/src/views/KnowledgeBaseView.vue`
-- [x] 创建知识库详情页 `frontend/src/views/KnowledgeDetailView.vue`
-- [x] 创建树形组件 `frontend/src/components/KnowledgeTreeNode.vue`
-- [x] 添加路由配置
-- [x] 更新顶部导航
+--------------------------------------------------------------------------------
+### Code Review: Knowledge Base Embedding Implementation
+--------------------------------------------------------------------------------
+**Reviewer**: Claude (AI Code Review Expert)
+**Date**: 2026-03-04
+**Scope**: Local embedding model support and batch embedding functionality
 
 ---
 
-## Code Review 记录
+### Executive Summary
 
-### 2026-03-04: Phase 1 - 数据库迁移脚本实现
+The implementation adds local embedding model support using `@xenova/transformers` and batch embedding functionality for knowledge base semantic search. The overall implementation is **functional but has several issues** that should be addressed before production deployment.
 
-**实现内容**：创建知识库数据库表结构
-
-**代码位置**：`scripts/migrate-add-knowledge-base.js`
-
-**表结构设计**：
-
-| 表名 | 说明 | 关键字段 |
-|------|------|----------|
-| `knowledge_bases` | 知识库 | `id`, `name`, `owner_id`, `embedding_model_id` |
-| `knowledges` | 文章（树状） | `id`, `kb_id`, `parent_id`, `title`, `status` |
-| `knowledge_points` | 知识点 | `id`, `knowledge_id`, `content`, `context`, `embedding` |
-| `knowledge_relations` | 知识点关联 | `source_id`, `target_id`, `relation_type` |
-
-**设计亮点**：
-
-1. **树状结构**：`knowledges` 表通过 `parent_id` 自关联实现树状结构
-2. **上下文字段**：`knowledge_points.context` 用于向量化时提供语境
-3. **向量存储**：使用 `BLOB` 存储向量（JSON 序列化），后期可迁移到专业向量库
-4. **语义关联**：`knowledge_relations` 支持多种关系类型（depends_on, references, related_to 等）
-
-**测试结果**：
-
-```
-Connected to database: touwaka_mate
-Checking knowledge_bases table...
-  ✅ knowledge_bases table created
-Checking knowledges table...
-  ✅ knowledges table created
-Checking knowledge_points table...
-  ✅ knowledge_points table created
-Checking knowledge_relations table...
-  ✅ knowledge_relations table created
-  ✅ KB images directory: /Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/data/kb-images
-
-✅ Migration completed successfully!
-```
-
-**注意事项**：
-
-1. `knowledge_bases.owner_id` 使用 `VARCHAR(32)` 与 `users.id` 类型一致
-2. 暂未添加 `owner_id` 外键约束，由应用层保证数据一致性
-3. 图片存储目录 `data/kb-images` 已创建
+**Overall Assessment**: Needs Improvement
 
 ---
 
-### 2026-03-04: Phase 2 - 后端 API 实现
+### Implementation Status
 
-#### 1. Sequelize 模型
-
-**文件**：
-- `models/knowledge_base.js` - 知识库模型
-- `models/knowledge.js` - 文章模型（树状结构）
-- `models/knowledge_point.js` - 知识点模型
-- `models/knowledge_relation.js` - 知识点关联模型
-- `models/init-models.js` - 模型关联配置
-
-**模型关联**：
-
-```
-knowledge_base (1) → (N) knowledge (文章)
-knowledge (1) → (N) knowledge (自关联，子文章)
-knowledge (1) → (N) knowledge_point (知识点)
-knowledge_point (N) ↔ (N) knowledge_point (通过 knowledge_relation)
-```
-
-**代码质量**：
-
-| 项目 | 评价 | 说明 |
+| Phase | Content | Status |
 |------|------|------|
-| 类型匹配 | ✅ | `owner_id` 使用 `VARCHAR(32)` 匹配 `users.id` |
-| 索引设计 | ✅ | 所有关键字段都有索引 |
-| 关联配置 | ✅ | 正确配置了 `belongsTo` 和 `hasMany` |
-| 注释完整 | ✅ | 所有字段都有中文注释 |
-
-#### 2. 控制器实现
-
-**文件**：`server/controllers/knowledge-base.controller.js`
-
-**API 端点**：
-
-| 方法 | 路径 | 功能 |
-|------|------|------|
-| POST | `/api/kb/query` | 复杂查询知识库 |
-| GET | `/api/kb` | 获取知识库列表 |
-| POST | `/api/kb` | 创建知识库 |
-| GET | `/api/kb/:id` | 获取知识库详情 |
-| PUT | `/api/kb/:id` | 更新知识库 |
-| DELETE | `/api/kb/:id` | 删除知识库 |
-| POST | `/api/kb/:kb_id/knowledges/query` | 复杂查询文章 |
-| GET | `/api/kb/:kb_id/knowledges/tree` | 获取文章树 |
-| POST | `/api/kb/:kb_id/knowledges` | 创建文章 |
-| GET | `/api/kb/:kb_id/knowledges/:id` | 获取文章详情 |
-| PUT | `/api/kb/:kb_id/knowledges/:id` | 更新文章 |
-| DELETE | `/api/kb/:kb_id/knowledges/:id` | 删除文章 |
-| GET | `/api/kb/:kb_id/knowledges/:knowledge_id/points` | 获取知识点列表 |
-| POST | `/api/kb/:kb_id/knowledges/:knowledge_id/points` | 创建知识点 |
-| GET | `/api/kb/:kb_id/knowledges/:knowledge_id/points/:id` | 获取知识点详情 |
-| PUT | `/api/kb/:kb_id/knowledges/:knowledge_id/points/:id` | 更新知识点 |
-| DELETE | `/api/kb/:kb_id/knowledges/:knowledge_id/points/:id` | 删除知识点 |
-
-**代码质量**：
-
-| 项目 | 评价 | 说明 |
-|------|------|------|
-| 权限控制 | ✅ | 所有操作都验证 `owner_id` |
-| 参数验证 | ✅ | 检查必填字段（name, title, content） |
-| 错误处理 | ✅ | 统一使用 `ctx.error()` 返回错误 |
-| 日志记录 | ✅ | 所有错误都有 `logger.error()` |
-| 分页支持 | ✅ | 列表接口支持分页 |
-| 复杂查询 | ✅ | 支持 POST `/query` 高级查询 |
-
-**设计亮点**：
-
-1. **层级路由**：RESTful 设计，资源层级清晰
-2. **树状结构**：`getKnowledgeTree()` 递归构建文章树
-3. **权限隔离**：每个操作都验证用户权限
-4. **性能优化**：列表接口排除 `embedding` 字段（太大）
-5. **统计信息**：`getKb()` 返回文章数和知识点数
-
-**潜在改进点**：
-
-| 问题 | 严重程度 | 建议 |
-|------|----------|------|
-| 重复代码 | 低 | 权限验证逻辑可抽取为中间件 |
-| 统计查询 | 低 | `getKb()` 的 pointCount 查询可优化 |
-| 批量操作 | 建议 | 后续可添加批量创建/删除接口 |
-
-#### 3. 路由实现
-
-**文件**：`server/routes/knowledge-base.routes.js`
-
-**代码质量**：
-
-| 项目 | 评价 | 说明 |
-|------|------|------|
-| 路由组织 | ✅ | 按资源层级分组，注释清晰 |
-| 认证中间件 | ✅ | 所有路由都需要认证 |
-| RESTful 设计 | ✅ | 符合 REST 规范 |
-
-#### 4. 服务器集成
-
-**修改文件**：
-- `server/index.js` - 导入并注册控制器和路由
-- `server/controllers/index.js` - 导出控制器
-- `server/routes/index.js` - 导出路由
+| Phase 1 | Database table design | Completed |
+| Phase 2 | Backend API | Completed |
+| Phase 3 | Document import skill | Completed |
+| Phase 4 | RAG integration | Completed |
+| Phase 5 | Frontend UI | Completed |
+| Phase 6 | Model type support | Completed |
+| Phase 7 | Local embedding support | Completed |
+| Phase 8 | Batch embedding API | Completed |
 
 ---
 
-### 2026-03-04: Phase 3 - 知识库技能实现
+## Code Review Findings
 
-**实现内容**：创建知识库管理技能
+--------------------------------------------------------------------------------
+### 1. CRITICAL ISSUES (Must Fix)
+--------------------------------------------------------------------------------
 
-**代码位置**：`data/skills/knowledge-base/`
-
-**文件结构**：
-
-```
-data/skills/knowledge-base/
-├── SKILL.md        # 技能定义文档
-└── index.js        # 技能实现
-```
-
-**工具列表**：
-
-| 工具名 | 功能 | 状态 |
-|--------|------|------|
-| `kb-list` | 获取知识库列表 | ✅ |
-| `kb-get` | 获取知识库详情 | ✅ |
-| `kb-create` | 创建知识库 | ✅ |
-| `kb-import-file` | 导入文件到知识库 | ✅ |
-| `kb-import-web` | 导入网页内容 | ✅ |
-| `kb-chunk-text` | 文本智能分块 | ✅ |
-| `kb-create-point` | 创建知识点 | ✅ |
-| `kb-embed` | 生成向量嵌入 | ✅ |
-| `kb-search-vector` | 向量语义检索 | ✅ |
-| `kb-get-point` | 获取知识点详情 | ✅ |
-| `kb-get-knowledge` | 获取文章详情 | ✅ |
-
-**后端 API 扩展**：
-
-| 新增路由 | 功能 |
-|----------|------|
-| `GET /api/kb/:kb_id/points/:id` | 获取知识点（含 embedding） |
-| `GET /api/kb/:kb_id/points-without-embedding` | 获取未向量化知识点 |
-| `PUT /api/kb/:kb_id/knowledges/:knowledge_id/points/:id` | 支持更新 embedding |
-
-**设计亮点**：
-
-1. **智能分块**：`chunkText()` 按段落分割，支持重叠，自动处理大段落
-2. **Token 估算**：区分中英文，准确估算 token 数量
-3. **向量存储**：使用 BLOB 存储 JSON 序列化的向量
-4. **相似度计算**：实现余弦相似度算法
-5. **API 集成**：通过 HTTP 调用后端 API，支持认证
-
-**代码质量**：
-
-| 项目 | 评价 | 说明 |
-|------|------|------|
-| 文件解析 | ✅ | 支持 .md, .txt, .html 直接解析 |
-| PDF/DOCX | ⚠️ | 需要调用对应的 PDF/DOCX 技能 |
-| 错误处理 | ✅ | 所有工具都有完善的错误处理 |
-| 文件验证 | ✅ | 检查文件大小、类型 |
-| 参数验证 | ✅ | 检查必填参数 |
-
-**配置说明**：
+#### 1.1 Frontend: Batch Embed Only Current Article Points [BUG]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/frontend/src/views/KnowledgeDetailView.vue`
+**Lines**: 363-371
 
 ```javascript
-// 环境变量配置
-EMBEDDING_API_URL   // Embedding API 地址
-EMBEDDING_API_KEY   // API 密钥
-EMBEDDING_MODEL     // 模型名称（默认 text-embedding-3-small）
-KB_API_BASE         // 后端 API 地址（默认 http://localhost:3000/api）
-```
-
-**待优化项**：
-
-| 问题 | 严重程度 | 建议 |
-|------|----------|------|
-| 向量检索性能 | 中 | 数据量大时应迁移到专业向量库 |
-| PDF/DOCX 解析 | 低 | 当前需要手动调用对应技能 |
-| 批量操作 | 建议 | 可添加批量创建知识点接口 |
-
----
-
-### 2026-03-04: Phase 4 - RAG 集成实现
-
-**实现内容**：创建 RAG 服务并集成到 Chat 流程
-
-**代码位置**：`lib/rag-service.js`
-
-**核心功能**：
-
-| 方法 | 功能 |
-|------|------|
-| `retrieve()` | RAG 检索主入口 |
-| `getTargetKbIds()` | 获取目标知识库ID列表 |
-| `generateQueryEmbedding()` | 生成查询向量 |
-| `vectorSearch()` | 向量相似度搜索 |
-| `buildContextMessage()` | 构建 RAG 上下文消息 |
-
-**ChatService 集成**：
-
-修改 `lib/chat-service.js`，在 `ExpertChatService.buildContext()` 中添加 RAG 检索：
-
-```javascript
-// RAG 检索知识库内容
-const knowledgeConfig = this.expertConfig.expert?.knowledge_config;
-if (knowledgeConfig?.enabled && this.ragService) {
-  const ragResult = await this.ragService.retrieve(currentMessage, {
-    expertId: this.expertId,
-    kbId: knowledgeConfig.kb_id,
-    topK: knowledgeConfig.top_k || 5,
-    threshold: knowledgeConfig.threshold || 0.7,
-    userId: user_id,
-  });
-  // 将检索结果注入上下文
+// BUG: Only embeds points from currently selected article, not entire knowledge base
+const allPoints = kbStore.currentPoints
+if (allPoints.length === 0) {
+  alert(t('knowledgeBase.noPointsToEmbed') || 'No knowledge points to embed')
+  return
 }
 ```
 
-**ContextManager 扩展**：
+**Problem**: The batch embed button in the header implies it should embed ALL points in the knowledge base, but it only embeds points from the currently selected article (`kbStore.currentPoints`). This is a significant UX bug.
 
-新增 `enhanceWithRAGContext()` 方法，将知识库检索结果注入到 System Prompt：
+**Recommendation**:
+- Either fetch all points from the knowledge base via API
+- Or clearly label the button to indicate it only embeds current article's points
+- Use `getPointsWithoutEmbedding(kbId)` API to get all unembedded points across the knowledge base
 
-```
-## 相关知识库内容
-以下是从知识库中检索到的相关内容，请参考这些信息回答用户问题：
-...
-```
+---
 
-**专家配置字段**：
-
-在 `experts` 表添加 `knowledge_config` 字段（JSON 格式）：
+#### 1.2 Backend: Missing Transaction/Atomicity in Batch Embed [QUALITY]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+**Lines**: 950-975
 
 ```javascript
-{
-  enabled: true,           // 是否启用知识库
-  kb_id: 1,                // 知识库ID
-  top_k: 5,                // 返回数量
-  threshold: 0.7,          // 相似度阈值
-  max_tokens: 2000,        // 最大 token 数
-  style: 'default'         // 输出风格：default, concise, detailed
+for (const point of points) {
+  try {
+    // ... embedding generation ...
+    await this.KnowledgePoint.update(
+      { embedding: JSON.stringify(embedding) },
+      { where: { id: point.id } }
+    );
+    successCount++;
+    // ...
+  } catch (error) {
+    failCount++;
+    // ...
+  }
 }
 ```
 
-**设计亮点**：
+**Problem**: Sequential database updates without transaction wrapping. If the process fails midway, some points will have embeddings while others won't, leaving the knowledge base in an inconsistent state.
 
-1. **自动检索**：用户提问时自动检索相关知识库内容
-2. **上下文注入**：检索结果格式化后注入到 System Prompt
-3. **可配置性**：每个专家可独立配置知识库参数
-4. **Token 控制**：支持限制 RAG 上下文的 token 数量
+**Recommendation**: Wrap in a database transaction or use bulk update with rollback capability.
 
 ---
 
-## 文件清单
+#### 1.3 Backend: No Rate Limiting on Batch Embed [SECURITY/PERFORMANCE]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+**Lines**: 910-987
 
-| 文件 | 类型 | 状态 |
-|------|------|------|
-| `scripts/migrate-add-knowledge-base.js` | 迁移脚本 | ✅ 已创建 |
-| `scripts/migrate-add-knowledge-config.js` | 迁移脚本 | ✅ 已创建 |
-| `models/knowledge_base.js` | 模型 | ✅ 已修改 |
-| `models/knowledge.js` | 模型 | ✅ 已创建 |
-| `models/knowledge_point.js` | 模型 | ✅ 已创建 |
-| `models/knowledge_relation.js` | 模型 | ✅ 已创建 |
-| `models/expert.js` | 模型 | ✅ 已修改 |
-| `models/init-models.js` | 模型配置 | ✅ 已修改 |
-| `server/controllers/knowledge-base.controller.js` | 控制器 | ✅ 已创建/修改 |
-| `server/routes/knowledge-base.routes.js` | 路由 | ✅ 已创建/修改 |
-| `server/controllers/index.js` | 导出 | ✅ 已修改 |
-| `server/routes/index.js` | 导出 | ✅ 已修改 |
-| `server/index.js` | 服务器 | ✅ 已修改 |
-| `data/skills/knowledge-base/SKILL.md` | 技能定义 | ✅ 已创建 |
-| `data/skills/knowledge-base/index.js` | 技能实现 | ✅ 已创建 |
-| `lib/rag-service.js` | RAG 服务 | ✅ 已创建 |
-| `lib/chat-service.js` | Chat 服务 | ✅ 已修改 |
-| `lib/context-manager.js` | 上下文管理 | ✅ 已修改 |
+**Problem**: The `embedBatch` endpoint has no rate limiting or maximum batch size validation. A user could potentially request embedding for thousands of points in a single request, causing:
+- Server memory exhaustion
+- Long-running requests that timeout
+- Potential DoS vector
+
+**Recommendation**:
+```javascript
+// Add at the start of embedBatch()
+const MAX_BATCH_SIZE = 100;
+if (point_ids.length > MAX_BATCH_SIZE) {
+  ctx.error(`Batch size exceeds maximum of ${MAX_BATCH_SIZE}`);
+  return;
+}
+```
 
 ---
 
-### 2026-03-04: Phase 5 - 前端界面实现
+### 2. HIGH PRIORITY ISSUES (Should Fix)
+--------------------------------------------------------------------------------
 
-**实现内容**：创建知识库前端界面
+#### 2.1 Backend: Potential SQL Injection via Sequelize Raw Where [SECURITY]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+**Lines**: 841-854
 
-**代码位置**：`frontend/src/views/`, `frontend/src/components/`, `frontend/src/stores/`
+```javascript
+const points = await this.KnowledgePoint.findAll({
+  where: {
+    embedding: null,
+  },
+  include: [{
+    model: this.Knowledge,
+    as: 'knowledge',
+    where: { kb_id },  // This is safe - Sequelize parameterizes
+    attributes: ['id', 'title'],
+  }],
+  // ...
+});
+```
 
-**新增文件**：
+**Status**: Actually SAFE - Sequelize parameterizes queries. However, the codebase should consistently use this pattern.
 
-| 文件 | 说明 |
-|------|------|
-| `stores/knowledgeBase.ts` | 知识库 Pinia Store |
-| `views/KnowledgeBaseView.vue` | 知识库列表页 |
-| `views/KnowledgeDetailView.vue` | 知识库详情页 |
-| `components/KnowledgeTreeNode.vue` | 文章树形节点组件 |
+---
 
-**修改文件**：
+#### 2.2 Skill: Dynamic Import Path Traversal Risk [SECURITY]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/data/skills/knowledge-base/index.js`
+**Lines**: 763
 
-| 文件 | 修改内容 |
-|------|----------|
-| `types/index.ts` | 添加知识库相关类型定义 |
-| `api/services.ts` | 添加知识库 API 方法 |
-| `i18n/locales/zh-CN.ts` | 添加中文翻译 |
-| `i18n/locales/en-US.ts` | 添加英文翻译 |
-| `router/index.ts` | 添加知识库路由 |
-| `components/AppHeader.vue` | 添加知识库导航入口 |
+```javascript
+const localEmbedding = await import('../../../lib/local-embedding.js');
+```
 
-**页面结构**：
+**Problem**: While this specific path is hardcoded and safe, the pattern of dynamic imports could be problematic if extended. The relative path is also fragile to file structure changes.
 
-1. **知识库列表页** (`KnowledgeBaseView.vue`)
-   - 大图标卡片网格布局
-   - 创建/编辑/删除知识库
-   - 右键上下文菜单
-   - 搜索过滤
+**Recommendation**: Consider using absolute paths or a registered module system for better maintainability.
 
-2. **知识库详情页** (`KnowledgeDetailView.vue`)
-   - 左侧：文章树形导航
-   - 右侧：知识点内容展示
-   - Markdown 渲染
-   - 语义搜索对话框
+---
 
-3. **树形节点组件** (`KnowledgeTreeNode.vue`)
-   - 递归渲染树形结构
-   - 展开/折叠
-   - 右键菜单操作
-   - 选中高亮
+#### 2.3 Frontend: No Loading Indicator During Batch Embed [UX]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/frontend/src/views/KnowledgeDetailView.vue`
+**Lines**: 358-388
 
-**类型定义** (`types/index.ts`)：
+**Problem**: During batch embedding, users only see a disabled button. For large batches, there's no progress indication.
+
+**Recommendation**: Add a progress bar or percentage indicator showing `X/Y points embedded`.
+
+---
+
+#### 2.4 Backend: Embedding Stored as JSON String in BLOB [PERFORMANCE]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+**Lines**: 961-963
+
+```javascript
+await this.KnowledgePoint.update(
+  { embedding: JSON.stringify(embedding) },
+  { where: { id: point.id } }
+);
+```
+
+**Problem**: Embeddings are stored as JSON strings in BLOB fields. This:
+- Increases storage size (JSON overhead)
+- Requires parsing on every search
+- Is inefficient for vector operations
+
+**Recommendation**: Use a proper vector column type (pgvector) or at least store as raw Float32Array binary data.
+
+---
+
+### 3. MEDIUM PRIORITY ISSUES (Should Consider)
+--------------------------------------------------------------------------------
+
+#### 3.1 Skill: Local Embedding Fallback Logic Duplication [MAINTAINABILITY]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/data/skills/knowledge-base/index.js`
+**Lines**: 755-785
+
+```javascript
+async function generateEmbedding(text, kbInfo, context) {
+  // Complex fallback logic duplicated between skill and controller
+}
+```
+
+**Problem**: The embedding generation logic with fallback is duplicated between:
+- `data/skills/knowledge-base/index.js` (lines 755-785)
+- `server/controllers/knowledge-base.controller.js` (lines 1114-1164)
+
+This violates DRY principle and could lead to inconsistent behavior.
+
+**Recommendation**: Extract to a shared service module that both can import.
+
+---
+
+#### 3.2 Controller: Mixed Concerns in Controller [ARCHITECTURE]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+
+**Problem**: The controller handles:
+- HTTP request/response
+- Business logic
+- Embedding generation
+- Similarity calculations
+
+This makes the controller bloated (1184 lines) and hard to test.
+
+**Recommendation**: Extract services:
+- `EmbeddingService` - handles embedding generation
+- `SearchService` - handles similarity search
+- `KnowledgeBaseService` - business logic
+
+---
+
+#### 3.3 Frontend: Using `alert()` for User Feedback [UX]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/frontend/src/views/KnowledgeDetailView.vue`
+**Lines**: 366, 374, 380, 384
+
+```javascript
+alert(t('knowledgeBase.noPointsToEmbed') || 'No knowledge points to embed')
+alert(t('knowledgeBase.embedSuccess', { count: response.success }) || `...`)
+alert(t('knowledgeBase.embedFailed') || 'Failed to embed points')
+alert(t('knowledgeBase.embedError') || 'Error embedding points')
+```
+
+**Problem**: Using browser `alert()` is poor UX. It blocks the UI and looks unprofessional.
+
+**Recommendation**: Use a toast notification system or the app's existing notification mechanism.
+
+---
+
+#### 3.4 Missing Error Boundary for Local Model Loading [ERROR HANDLING]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/lib/local-embedding.js`
+**Lines**: 51-74
+
+```javascript
+loadPromise = (async () => {
+  // ... loading logic ...
+  loadError = error;
+  logger.error('[LocalEmbedding] Failed to load model:', error.message);
+  throw error;
+})();
+```
+
+**Problem**: If the model fails to load, subsequent calls will keep throwing. The `loadError` is set but callers may not check it.
+
+**Recommendation**: Add a `wasLoadError()` function or reset mechanism.
+
+---
+
+### 4. LOW PRIORITY ISSUES (Nice to Have)
+--------------------------------------------------------------------------------
+
+#### 4.1 Inconsistent Error Message Formats [CONSISTENCY]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+
+Some errors use Chinese, some use English, some include both:
+- Line 917: `ctx.error('请提供知识点ID列表')`
+- Line 941: `ctx.error('没有找到符合条件的知识点')`
+- Line 985: `ctx.error('批量生成嵌入向量失败', 500)`
+
+**Recommendation**: Standardize on i18n keys or English messages with consistent format.
+
+---
+
+#### 4.2 Missing Type Safety in API Response [TYPESCRIPT]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/frontend/src/api/services.ts`
+**Lines**: 496-499
 
 ```typescript
-// 核心类型
-interface KnowledgeBase { ... }
-interface Knowledge { ... }
-interface KnowledgePoint { ... }
-interface KnowledgeRelation { ... }
-
-// 请求类型
-interface CreateKnowledgeBaseRequest { ... }
-interface UpdateKnowledgeBaseRequest { ... }
-interface CreateKnowledgeRequest { ... }
-interface CreateKnowledgePointRequest { ... }
-
-// 搜索类型
-interface KnowledgeSearchRequest { ... }
-interface KnowledgeSearchResult { ... }
-
-// 专家配置
-interface ExpertKnowledgeConfig { ... }
+batchEmbedPoints: (kbId: number, pointIds: number[]) =>
+  apiRequest<{ total: number; success: number; failed: number; results: { success: boolean; point_id: number }[] }>(
+    apiClient.post(`/kb/${kbId}/points/batch-embed`, { point_ids: pointIds }),
+  ),
 ```
 
-**Store 设计** (`stores/knowledgeBase.ts`)：
+**Status**: Good - proper TypeScript types are defined. This is a positive finding.
 
-| 状态 | 说明 |
-|------|------|
-| `knowledgeBases` | 知识库列表 |
-| `currentKb` | 当前知识库 |
-| `knowledgeTree` | 文章树 |
-| `currentKnowledge` | 当前文章 |
-| `currentPoints` | 当前知识点列表 |
-| `searchResults` | 搜索结果 |
+---
 
-| 方法 | 说明 |
-|------|------|
-| `loadKnowledgeBases()` | 加载知识库列表 |
-| `createKnowledgeBase()` | 创建知识库 |
-| `loadKnowledgeTree()` | 加载文章树 |
-| `createKnowledge()` | 创建文章 |
-| `createKnowledgePoint()` | 创建知识点 |
-| `search()` | 语义搜索 |
+#### 4.3 Store: Proper Error State Management [POSITIVE]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/frontend/src/stores/knowledgeBase.ts`
+**Lines**: 397-428
 
-**代码质量**：
+The store properly manages error state and provides loading indicators. Good implementation.
 
-| 项目 | 评价 | 说明 |
+---
+
+#### 4.4 i18n: Complete Translation Coverage [POSITIVE]
+**Files**:
+- `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/frontend/src/i18n/locales/zh-CN.ts`
+- `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/frontend/src/i18n/locales/en-US.ts`
+
+Both `batchEmbed` related translations are properly defined in both locales. Good i18n coverage.
+
+---
+
+### 5. SECURITY REVIEW
+--------------------------------------------------------------------------------
+
+#### 5.1 Authentication Check [PASS]
+All routes use `authenticate()` middleware. Proper auth protection.
+
+#### 5.2 Authorization Check [PASS]
+All operations verify `owner_id: ctx.state.userId` before allowing access.
+
+#### 5.3 Input Validation [NEEDS IMPROVEMENT]
+- **kb_id**: Validated via existence check
+- **point_ids**: Type checked (array) but no size limit
+- **embedding content**: No length validation
+
+**Recommendation**: Add input size limits.
+
+---
+
+### 6. PERFORMANCE REVIEW
+--------------------------------------------------------------------------------
+
+#### 6.1 N+1 Query Issue [PERFORMANCE]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+**Lines**: 950-975
+
+The batch embed does individual updates in a loop instead of bulk update.
+
+**Impact**: For 100 points, this creates 100 database round-trips.
+
+**Recommendation**:
+```javascript
+// Bulk update after generating all embeddings
+const updates = points.map(p => ({ id: p.id, embedding: p.embedding }));
+await this.KnowledgePoint.bulkCreate(updates, { updateOnDuplicate: ['embedding'] });
+```
+
+#### 6.2 Search: In-Memory Similarity Calculation [SCALABILITY]
+**File**: `/Users/jeanqiu/Documents/qjy_project/touwaka-ai-mate/server/controllers/knowledge-base.controller.js`
+**Lines**: 1052-1076
+
+All points are loaded into memory and similarity is calculated in JavaScript. This won't scale past ~10,000 points.
+
+**Recommendation**: Use pgvector's similarity search or a vector database (Qdrant, Milvus) for production scale.
+
+---
+
+## Summary of Required Actions
+--------------------------------------------------------------------------------
+
+| Priority | Issue | File | Recommendation |
+|----------|-------|------|----------------|
+| CRITICAL | Batch embed only current article | KnowledgeDetailView.vue | Fix to embed all KB points |
+| CRITICAL | No transaction in batch embed | knowledge-base.controller.js | Add transaction wrapper |
+| CRITICAL | No batch size limit | knowledge-base.controller.js | Add MAX_BATCH_SIZE limit |
+| HIGH | No progress indicator | KnowledgeDetailView.vue | Add progress UI |
+| HIGH | JSON storage inefficiency | knowledge-base.controller.js | Use Float32Array or pgvector |
+| MEDIUM | Duplicated embedding logic | index.js, controller | Extract to shared service |
+| MEDIUM | Controller bloat | knowledge-base.controller.js | Extract services |
+| MEDIUM | Using alert() | KnowledgeDetailView.vue | Use toast notifications |
+| MEDIUM | N+1 database updates | knowledge-base.controller.js | Use bulk update |
+| LOW | Inconsistent error messages | knowledge-base.controller.js | Standardize format |
+| LOW | In-memory search scaling | knowledge-base.controller.js | Plan vector DB migration |
+
+---
+
+## Test Recommendations
+--------------------------------------------------------------------------------
+
+1. **Unit Tests Needed**:
+   - `generateQueryEmbedding()` with local vs external model
+   - `cosineSimilarity()` edge cases (empty, mismatched lengths)
+   - `embedBatch()` with various batch sizes
+
+2. **Integration Tests Needed**:
+   - Batch embed flow end-to-end
+   - Search with and without embeddings
+   - Permission boundaries
+
+3. **Load Tests Needed**:
+   - Batch embed with 100+ points
+   - Search with 10,000+ points
+
+---
+
+## API Endpoints
+
+| Method | Path | Functionality |
+|--------|------|---------------|
+| GET | `/api/kb` | List knowledge bases |
+| POST | `/api/kb` | Create knowledge base |
+| GET | `/api/kb/:id` | Get knowledge base details |
+| PUT | `/api/kb/:id` | Update knowledge base |
+| DELETE | `/api/kb/:id` | Delete knowledge base |
+| GET | `/api/kb/:kb_id/knowledges/tree` | Get article tree |
+| POST | `/api/kb/:kb_id/knowledges` | Create article |
+| GET/PUT/DELETE | `/api/kb/:kb_id/knowledges/:id` | Article CRUD |
+| GET/POST | `/api/kb/:kb_id/knowledges/:knowledge_id/points` | List/create points |
+| GET/PUT/DELETE | `/api/kb/:kb_id/knowledges/:knowledge_id/points/:id` | Point CRUD |
+| POST | `/api/kb/:kb_id/search` | Semantic search |
+| GET | `/api/kb/:kb_id/points-without-embedding` | Get unembedded points |
+| POST | `/api/kb/:kb_id/points/batch-embed` | Batch generate embeddings |
+
+---
+
+## Pending Optimizations
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| Knowledge graph visualization | Nice-to-have | UI enhancement |
+| Rich text editor | Nice-to-have | Markdown editor |
+| Batch import/export | Nice-to-have | Data portability |
+| Vector DB migration (Qdrant) | Performance | Required at scale |
+| Progress indicator for batch embed | High | UX improvement |
+| Toast notifications | Medium | UX improvement |
+
+---
+
+## Files Reviewed
+
+| File | Status | Key Issues |
+|------|--------|------------|
+| `data/skills/knowledge-base/index.js` | Reviewed | Duplicated logic, fallback complexity |
+| `server/controllers/knowledge-base.controller.js` | Reviewed | No transaction, N+1, bloat |
+| `server/routes/knowledge-base.routes.js` | OK | Clean routing |
+| `frontend/src/api/services.ts` | OK | Proper types |
+| `frontend/src/stores/knowledgeBase.ts` | OK | Good state management |
+| `frontend/src/views/KnowledgeDetailView.vue` | Reviewed | Wrong scope, alert() usage |
+| `frontend/src/i18n/locales/zh-CN.ts` | OK | Complete translations |
+| `frontend/src/i18n/locales/en-US.ts` | OK | Complete translations |
+| `lib/local-embedding.js` | Reviewed | Error handling could be improved |
+
+---
+
+## 批量向量化范围选择功能 (2026-03-04)
+
+### 新增功能
+
+添加了批量向量化范围选择对话框，允许用户选择向量化整个知识库或指定文章的知识点。
+
+**修改文件**：
+
+- `frontend/src/views/KnowledgeDetailView.vue` - 添加范围选择对话框和相关逻辑
+
+### Code Review 发现
+
+#### 关键问题
+
+| 问题 | 位置 | 说明 |
 |------|------|------|
-| 组件拆分 | ✅ | 树形组件独立，可复用 |
-| 类型安全 | ✅ | 所有接口都有类型定义 |
-| 国际化 | ✅ | 中英文翻译完整 |
-| 响应式 | ✅ | 支持移动端布局 |
-| 错误处理 | ✅ | Store 统一错误处理 |
+| 状态污染 | `closeBatchEmbedDialog()` | 关闭对话框时未重置 `batchEmbedArticleId` 和 `batchEmbedScope` |
+| 竞态条件 | `executeBatchEmbed()` | 未在函数开始时捕获作用域值，可能导致快速操作时使用错误的文章 |
 
-**设计亮点**：
-
-1. **卡片式布局**：类似 macOS Launchpad，直观易用
-2. **树形导航**：递归组件，支持无限层级
-3. **右键菜单**：原生右键体验，操作便捷
-4. **Markdown 渲染**：使用 marked 库，支持富文本
-5. **语义搜索**：支持向量相似度搜索
-
-**待优化项**：
-
-| 问题 | 严重程度 | 建议 |
-|------|----------|------|
-| 文章编辑器 | 中 | 当前仅支持简单表单，可升级为富文本编辑器 |
-| 知识图谱可视化 | 建议 | 后续可添加 vis-network 图谱视图 |
-| 拖拽排序 | 建议 | 支持拖拽调整文章顺序 |
-| 批量操作 | 建议 | 支持批量导入/删除 |
-
----
-
-## 测试与修复记录
-
-### 2026-03-04: Phase 5 测试
-
-**问题 1**：聊天时报错 `Unknown column 'knowledge_config' in 'SELECT'`
-
-**原因**：数据库迁移脚本未执行，`experts` 表缺少 `knowledge_config` 字段
-
-**修复**：
-- 修复迁移脚本 `scripts/migrate-add-knowledge-config.js`，添加 DB_PORT 支持
-- 执行迁移脚本添加字段
-- 迁移脚本已包含 DB_PORT 配置
-
-**问题 2**：前端构建报错 `failed to resolve import "marked"`
-
-**原因**：`KnowledgeDetailView.vue` 使用 `marked` 库但未安装
-
-**修复**：
-- 执行 `npm install marked` 安装依赖
-- 前端构建成功
-
-**测试结果**：
-
-| 项目 | 结果 |
-|------|------|
-| 数据库迁移 | ✅ knowledge_config 字段已添加 |
-| Expert 模型 | ✅ 已包含 knowledge_config 字段 |
-| RAG 服务 | ✅ rag-service.js 正确集成到 chat-service |
-| 前端 API | ✅ knowledgeBaseApi 已导出 |
-| 前端 Store | ✅ knowledgeBase.ts 状态管理正确 |
-| 前端路由 | ✅ /knowledge 和 /knowledge/:kbId 已配置 |
-| 前端导航 | ✅ AppHeader 已添加知识库入口 |
-| 前端构建 | ✅ 构建成功（68 modules） |
-
----
-
-## 完成总结
-
-知识库系统已完成全部 5 个阶段的开发：
-
-| 阶段 | 内容 | 状态 |
+#### 中等问题
+| 问题 | 位置 | 说明 |
 |------|------|------|
-| Phase 1 | 数据库表设计 | ✅ 完成 |
-| Phase 2 | 后端 API | ✅ 完成 |
-| Phase 3 | 文档导入技能 | ✅ 完成 |
-| Phase 4 | RAG 集成 | ✅ 完成 |
-| Phase 5 | 前端界面 | ✅ 完成 |
+| 下拉列表无层级显示 | 文章选择下拉框 | 扁平列表无法显示父子关系 |
+| 重复代码 | `knowledgeTreeForDialog` vs `flatKnowledgeList` | 两个几乎相同的计算属性 |
+| 子文章不包含 | 文章范围选择 | 选择文章时只处理该文章的知识点， 不包含子文章 |
 
-**功能清单**：
+#### 低优先级问题
+| 问题 | 位置 | 说明 |
+|------|------|------|
+| 缺少 CSS 样式 | `.form-radio`, `.dialog-hint` | 未定义样式 |
+| 使用 alert() | 多处 | 应使用 toast 通知 |
+| 无确认对话框 | 大批量操作 | 超过 100 个点时应确认 |
 
-- [x] 多知识库管理
-- [x] 树状文章结构
-- [x] 知识点 CRUD
-- [x] 文档导入技能
-- [x] 向量检索
-- [x] RAG 上下文注入
-- [x] 前端界面
+### 改进建议
+
+```typescript
+// 1. 修复状态重置
+const closeBatchEmbedDialog = () => {
+  showBatchEmbedDialog.value = false
+  batchEmbedScope.value = 'all'
+  batchEmbedArticleId.value = undefined
+}
+
+// 2. 捕获作用域值防止竞态
+const executeBatchEmbed = async () => {
+  if (isEmbedding.value) return
+
+  const scope = batchEmbedScope.value
+  const articleId = batchEmbedArticleId.value
+
+  isEmbedding.value = true
+  showBatchEmbedDialog.value = false
+  // 使用捕获的值...
+}
+
+// 3. 添加层级显示
+const knowledgeTreeForDialog = computed(() => {
+  const flatten = (nodes: Knowledge[], prefix = ''): Array<Knowledge & { displayName: string }> => {
+    const result: Array<Knowledge & { displayName: string }> = []
+    for (const node of nodes) {
+      const displayName = prefix ? `${prefix} / ${node.title}` : node.title
+      result.push({ ...node, displayName })
+      if (node.children && node.children.length > 0) {
+        result.push(...flatten(node.children, displayName))
+      }
+    }
+    return result
+  }
+  return flatten(kbStore.knowledgeTree)
+})
+```
 
 ---
 
-*此文档持续更新中...*
+## API 端点
+| Method | Path | Functionality |
+|--------|------|---------------|
+| GET | `/api/kb/:kb_id/points-without-embedding` | 获取未向量化的知识点 |
+| POST | `/api/kb/:kb_id/points/batch-embed` | 批量生成向量 |
+
+---
+
+## 待优化
+
+| 项目 | 优先级 |
+|------|--------|
+| 知识图谱可视化 | 建议 |
+| 富文本编辑器 | 建议 |
+| 批量导入/导出 | 建议 |
+| 向量库迁移（Qdrant等）| 性能需求时 |
+| 进度条显示 | 高 |
+| Toast 通知替代 alert | 中 |
+| 大批量确认对话框 | 低 |
+
+---
+
+*Review completed on 2026-03-04*

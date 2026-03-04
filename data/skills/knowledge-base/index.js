@@ -756,21 +756,32 @@ async function generateEmbedding(text, kbInfo, context) {
   // 获取 embedding 模型配置
   const embeddingModel = kbInfo?.embedding_model_id || context.embeddingModelId;
 
-  if (!embeddingModel) {
-    // 如果没有配置 embedding 模型，使用默认的 OpenAI 兼容 API
-    const apiUrl = process.env.EMBEDDING_API_URL || context.embeddingApiUrl;
-    const apiKey = process.env.EMBEDDING_API_KEY || context.embeddingApiKey;
-    const modelName = process.env.EMBEDDING_MODEL || context.embeddingModel || 'text-embedding-3-small';
-
-    if (!apiUrl || !apiKey) {
-      throw new Error('Embedding API not configured. Please set EMBEDDING_API_URL and EMBEDDING_API_KEY.');
+  // 如果没有配置外部模型，尝试使用本地 embedding
+  if (!embeddingModel || embeddingModel === 'local' || embeddingModel === 'local:all-MiniLM-L6-v2') {
+    try {
+      // 动态导入本地 embedding 服务
+      const localEmbedding = await import('../../../lib/local-embedding.js');
+      if (localEmbedding.isLocalModelAvailable()) {
+        const embeddings = await localEmbedding.generateEmbedding(text);
+        if (embeddings && embeddings[0]) {
+          return embeddings[0];
+        }
+      }
+    } catch (e) {
+      console.error('[KB] Local embedding failed:', e.message);
     }
+  }
 
+  // 如果本地失败或配置了外部模型，使用外部 API
+  const apiUrl = process.env.EMBEDDING_API_URL || context.embeddingApiUrl;
+  const apiKey = process.env.EMBEDDING_API_KEY || context.embeddingApiKey;
+  const modelName = process.env.EMBEDDING_MODEL || context.embeddingModel || 'text-embedding-3-small';
+
+  if (apiUrl && apiKey) {
     return await callEmbeddingApi(apiUrl, apiKey, modelName, text);
   }
 
-  // TODO: 从数据库获取模型配置并调用
-  throw new Error('Embedding with database model config not implemented yet.');
+  throw new Error('No embedding service available. Local model failed and no external API configured.');
 }
 
 /**

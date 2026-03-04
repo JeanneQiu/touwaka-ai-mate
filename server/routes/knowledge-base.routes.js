@@ -33,6 +33,9 @@ export default (controller) => {
   // 删除知识库
   router.delete('/:id', authenticate(), controller.deleteKb.bind(controller));
 
+  // 语义搜索
+  router.post('/:kb_id/search', authenticate(), controller.search.bind(controller));
+
   // ==================== 文章路由 ====================
 
   // 复杂查询文章列表
@@ -77,6 +80,9 @@ export default (controller) => {
 
   // 获取未向量化的知识点列表
   router.get('/:kb_id/points-without-embedding', authenticate(), controller.getPointsWithoutEmbedding.bind(controller));
+
+  // 批量生成知识点嵌入向量
+  router.post('/:kb_id/points/batch-embed', authenticate(), controller.embedBatch.bind(controller));
 
   return router;
 };

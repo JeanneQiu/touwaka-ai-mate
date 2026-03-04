@@ -191,9 +191,7 @@ export const useKnowledgeBaseStore = defineStore('knowledgeBase', () => {
       const knowledge = await knowledgeBaseApi.getKnowledge(kbId, knowledgeId)
       currentKnowledge.value = knowledge
       // 同时加载知识点列表
-      if (knowledge.points) {
-        currentPoints.value = knowledge.points
-      }
+      await loadKnowledgePoints(kbId, knowledgeId)
       return knowledge
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to load knowledge'
@@ -393,6 +391,42 @@ export const useKnowledgeBaseStore = defineStore('knowledgeBase', () => {
     error.value = null
   }
 
+  /**
+   * 获取未向量化的知识点
+   */
+  const getPointsWithoutEmbedding = async (kbId: number) => {
+    error.value = null
+    try {
+      const points = await knowledgeBaseApi.getPointsWithoutEmbedding(kbId)
+      return points
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to get points without embedding'
+      throw err
+    }
+  }
+
+  /**
+   * 批量生成嵌入向量
+   */
+  const batchEmbedPoints = async (kbId: number, pointIds: number[]) => {
+    if (!currentKb.value) {
+      error.value = 'No knowledge base selected'
+      return { total: 0, success: 0, failed: 0, results: [] }
+    }
+
+    isLoading.value = true
+    error.value = null
+    try {
+      const result = await knowledgeBaseApi.batchEmbedPoints(kbId, pointIds)
+      return result
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to batch embed points'
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   return {
     // State
     knowledgeBases,
@@ -437,6 +471,10 @@ export const useKnowledgeBaseStore = defineStore('knowledgeBase', () => {
     // Actions - 搜索
     search,
     clearSearchResults,
+
+    // Actions - 批量嵌入
+    batchEmbedPoints,
+    getPointsWithoutEmbedding,
 
     // Utilities
     clearError,

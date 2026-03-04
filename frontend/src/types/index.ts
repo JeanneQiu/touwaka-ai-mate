@@ -88,6 +88,7 @@ export interface AIModel {
   model_name: string  // API调用使用的模型标识符
   provider_id: string
   provider_name: string
+  model_type?: 'chat' | 'embedding' | 'image' | 'audio'
   description?: string
   max_tokens: number
   cost_per_1k_input: number
@@ -103,6 +104,7 @@ export interface ModelFormData {
   name: string
   model_name: string  // API调用使用的模型标识符
   provider_id: string
+  model_type?: 'chat' | 'embedding' | 'image' | 'audio'
   max_tokens?: number
   cost_per_1k_input?: number
   cost_per_1k_output?: number

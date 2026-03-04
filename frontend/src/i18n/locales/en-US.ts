@@ -268,6 +268,13 @@ export default {
     modelIdentifierHint: 'The model ID used when calling the API',
     provider: 'Provider',
     selectProvider: 'Select Provider',
+    modelType: 'Model Type',
+    selectModelType: 'Select Model Type',
+    modelTypeChat: 'Chat Model',
+    modelTypeEmbedding: 'Embedding Model',
+    modelTypeImage: 'Image Model',
+    modelTypeAudio: 'Audio Model',
+    maxTokens: 'Max Tokens',
     maxTokensPlaceholder: 'e.g., 4096',
     costPer1kInput: 'Cost per 1K Input Tokens',
     costPer1kOutput: 'Cost per 1K Output Tokens',
@@ -644,8 +651,28 @@ export default {
     // Article tree
     articleTree: 'Article Tree',
     noArticles: 'No articles yet. Import or create one.',
+    selectArticleHint: 'Select an article from the left',
     expandAll: 'Expand All',
     collapseAll: 'Collapse All',
+
+    // Batch embed
+    batchEmbed: 'Generate Embeddings',
+    embedding: 'Generating embeddings...',
+    noPointsToEmbed: 'No knowledge points to embed',
+    embedSuccess: 'Successfully embedded {count} points',
+    embedFailed: 'Failed to generate embeddings',
+    embedError: 'Error generating embeddings',
+    embedCompleted: 'Embedding generation completed',
+
+    // Batch embed scope selection
+    batchEmbedScope: {
+      title: 'Select Embedding Scope',
+      hint: 'Select the scope for embedding generation:',
+      entireKB: 'Entire Knowledge Base',
+      currentArticle: 'Specific Article',
+      selectArticle: 'Select Article',
+      selectArticlePlaceholder: 'Please select an article',
+    },
 
     // Article
     article: {
