@@ -33,7 +33,9 @@ const authenticate = () => {
 
     if (!token && internalUserId && internalSecret === INTERNAL_SECRET) {
       // 内部服务调用认证成功
-      ctx.state.userId = parseInt(internalUserId, 10);
+      // 支持数字和字符串（UUID）类型的 userId
+      const parsedUserId = parseInt(internalUserId, 10);
+      ctx.state.userId = isNaN(parsedUserId) ? internalUserId : parsedUserId;
       ctx.state.userRole = 'user';
       ctx.state.authType = 'internal';
       console.log('[Auth] Internal auth:', { userId: ctx.state.userId });
