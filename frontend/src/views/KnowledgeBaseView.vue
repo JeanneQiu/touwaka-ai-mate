@@ -42,28 +42,31 @@
 
     <!-- Knowledge Base Content with Pagination -->
     <template v-else>
-      <div class="kb-grid">
-        <!-- KB Cards -->
-        <div
-          v-for="kb in kbStore.knowledgeBases"
-          :key="kb.id"
-          class="kb-card"
-          @click="openKbDetail(kb)"
-          @contextmenu.prevent="showContextMenu($event, kb)"
-        >
-          <div class="kb-card-icon">{{ getKbIcon(kb) }}</div>
-          <div class="kb-card-name">{{ kb.name }}</div>
-          <div class="kb-card-desc" v-if="kb.description">{{ kb.description }}</div>
-          <div class="kb-card-stats">
-            <span>{{ $t('knowledgeBase.pointCount', { count: kb.point_count || 0 }) }}</span>
-          </div>
-          <div class="kb-card-time">
-            {{ formatUpdatedTime(kb.updated_at) }}
+      <!-- Scrollable content area -->
+      <div class="kb-content-wrapper">
+        <div class="kb-grid">
+          <!-- KB Cards -->
+          <div
+            v-for="kb in kbStore.knowledgeBases"
+            :key="kb.id"
+            class="kb-card"
+            @click="openKbDetail(kb)"
+            @contextmenu.prevent="showContextMenu($event, kb)"
+          >
+            <div class="kb-card-icon">{{ getKbIcon(kb) }}</div>
+            <div class="kb-card-name">{{ kb.name }}</div>
+            <div class="kb-card-desc" v-if="kb.description">{{ kb.description }}</div>
+            <div class="kb-card-stats">
+              <span>{{ $t('knowledgeBase.pointCount', { count: kb.point_count || 0 }) }}</span>
+            </div>
+            <div class="kb-card-time">
+              {{ formatUpdatedTime(kb.updated_at) }}
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Pagination -->
+      <!-- Pagination - fixed at bottom -->
       <div class="pagination">
         <div class="pagination-debug" v-if="false">
           totalPages: {{ totalPages }}, currentPage: {{ currentPage }}, totalCount: {{ totalCount }}
@@ -478,8 +481,7 @@ onUnmounted(() => {
   max-width: 1400px;
   width: 100%;
   margin: 0 auto;
-  height: calc(100vh - 120px);
-  max-height: calc(100vh - 120px);
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -635,6 +637,15 @@ onUnmounted(() => {
   margin-bottom: 24px;
 }
 
+/* Knowledge Base Content Wrapper */
+.kb-content-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Knowledge Base Grid */
 .kb-grid {
   display: grid;
@@ -644,6 +655,8 @@ onUnmounted(() => {
   padding: 8px;
   align-content: start;
   box-sizing: border-box;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .kb-card {
@@ -985,9 +998,10 @@ onUnmounted(() => {
   justify-content: center;
   align-items: center;
   gap: 16px;
-  padding: 20px 0;
-  margin-top: auto;
+  padding: 16px 0;
   border-top: 1px solid var(--border-color, #e0e0e0);
+  background: var(--bg-color, #fff);
+  flex-shrink: 0; /* 防止分页被压缩 */
 }
 
 .page-btn {

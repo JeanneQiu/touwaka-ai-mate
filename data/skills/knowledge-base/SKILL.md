@@ -8,14 +8,20 @@ tools:
   - kb-list
   - kb-get
   - kb-create
+  - kb-update
+  - kb-delete
   - kb-import-file
   - kb-import-web
   - kb-chunk-text
   - kb-create-point
+  - kb-update-point
+  - kb-delete-point
+  - kb-get-knowledge
+  - kb-update-knowledge
+  - kb-delete-knowledge
   - kb-embed
   - kb-search-vector
   - kb-get-point
-  - kb-get-knowledge
 ---
 
 # Knowledge Base Skill
@@ -51,6 +57,21 @@ tools:
 - `name`: 知识库名称
 - `description`: 描述（可选）
 - `embedding_model_id`: 向量模型ID（可选）
+
+#### kb-update
+更新知识库信息。
+
+**参数**:
+- `kb_id`: 知识库ID
+- `name`: 知识库名称（可选）
+- `description`: 描述（可选）
+- `embedding_model_id`: 向量模型ID（可选）
+
+#### kb-delete
+删除知识库。
+
+**参数**:
+- `kb_id`: 知识库ID
 
 ### 文档导入
 
@@ -105,9 +126,56 @@ tools:
 
 **参数**:
 - `knowledge_id`: 所属文章ID
+- `kb_id`: 知识库ID
 - `title`: 标题（可选）
 - `content`: Markdown 内容
 - `context`: 上下文信息（可选）
+
+#### kb-update-point
+更新知识点。
+
+**参数**:
+- `kb_id`: 知识库ID
+- `knowledge_id`: 所属文章ID
+- `point_id`: 知识点ID
+- `title`: 标题（可选）
+- `content`: Markdown 内容（可选）
+- `context`: 上下文信息（可选）
+
+#### kb-delete-point
+删除知识点。
+
+**参数**:
+- `kb_id`: 知识库ID
+- `knowledge_id`: 所属文章ID
+- `point_id`: 知识点ID
+
+### 文章管理
+
+#### kb-get-knowledge
+获取文章详情。
+
+**参数**:
+- `kb_id`: 知识库ID
+- `knowledge_id`: 文章ID
+- `include_points`: 是否包含知识点列表（默认 false）
+
+#### kb-update-knowledge
+更新文章。
+
+**参数**:
+- `kb_id`: 知识库ID
+- `knowledge_id`: 文章ID
+- `title`: 文章标题（可选）
+- `summary`: 摘要（可选）
+- `status`: 状态（可选，如 'pending', 'completed'）
+
+#### kb-delete-knowledge
+删除文章。
+
+**参数**:
+- `kb_id`: 知识库ID
+- `knowledge_id`: 文章ID
 
 ### 向量化
 
@@ -136,7 +204,7 @@ tools:
 - `query`: 搜索查询（自然语言）
 - `kb_id`: 知识库ID（可选）
 - `top_k`: 返回数量（默认 10）
-- `threshold`: 相似度阈值（默认 0.7）
+- `threshold`: 相似度阈值（默认 0.1，适用于 all-MiniLM-L6-v2 模型）
 
 **返回**:
 ```json

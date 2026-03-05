@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
 };
 
 // 允许导入的文件类型
-const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.md', '.txt', '.html', '.markdown'];
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.md', '.txt', '.html', '.markdown', '.png', '.jpg', '.jpeg', '.gif', '.webp'];
 
 // 最大文件大小 (50MB)
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -37,6 +37,10 @@ async function execute(toolName, params, context = {}) {
       return await kbGet(params, config, context);
     case 'kb-create':
       return await kbCreate(params, config, context);
+    case 'kb-update':
+      return await kbUpdate(params, config, context);
+    case 'kb-delete':
+      return await kbDelete(params, config, context);
 
     // 文档导入
     case 'kb-import-file':
@@ -49,6 +53,18 @@ async function execute(toolName, params, context = {}) {
       return await kbChunkText(params, config, context);
     case 'kb-create-point':
       return await kbCreatePoint(params, config, context);
+    case 'kb-update-point':
+      return await kbUpdatePoint(params, config, context);
+    case 'kb-delete-point':
+      return await kbDeletePoint(params, config, context);
+
+    // 文章管理
+    case 'kb-get-knowledge':
+      return await kbGetKnowledge(params, config, context);
+    case 'kb-update-knowledge':
+      return await kbUpdateKnowledge(params, config, context);
+    case 'kb-delete-knowledge':
+      return await kbDeleteKnowledge(params, config, context);
 
     // 向量化
     case 'kb-embed':
@@ -59,8 +75,6 @@ async function execute(toolName, params, context = {}) {
       return await kbSearchVector(params, config, context);
     case 'kb-get-point':
       return await kbGetPoint(params, config, context);
-    case 'kb-get-knowledge':
-      return await kbGetKnowledge(params, config, context);
 
     default:
       throw new Error(`Unknown tool: ${toolName}`);
@@ -104,6 +118,35 @@ async function kbCreate(params, config, context) {
     description,
     embedding_model_id,
   }, context);
+  return result;
+}
+
+/**
+ * kb-update: 更新知识库
+ */
+async function kbUpdate(params, config, context) {
+  const { kb_id, name, description, embedding_model_id, embedding_dim } = params;
+  if (!kb_id) {
+    throw new Error('kb_id is required');
+  }
+  const result = await apiRequest('PUT', `/kb/${kb_id}`, {
+    name,
+    description,
+    embedding_model_id,
+    embedding_dim,
+  }, context);
+  return result;
+}
+
+/**
+ * kb-delete: 删除知识库
+ */
+async function kbDelete(params, config, context) {
+  const { kb_id } = params;
+  if (!kb_id) {
+    throw new Error('kb_id is required');
+  }
+  const result = await apiRequest('DELETE', `/kb/${kb_id}`, null, context);
   return result;
 }
 
@@ -275,6 +318,41 @@ async function kbCreatePoint(params, config, context) {
   return result;
 }
 
+/**
+ * kb-update-point: 更新知识点
+ */
+async function kbUpdatePoint(params, config, context) {
+  const { kb_id, knowledge_id, point_id, title, content, context: ctx, position, token_count } = params;
+
+  if (!kb_id || !knowledge_id || !point_id) {
+    throw new Error('kb_id, knowledge_id and point_id are required');
+  }
+
+  const result = await apiRequest('PUT', `/kb/${kb_id}/knowledges/${knowledge_id}/points/${point_id}`, {
+    title,
+    content,
+    context: ctx,
+    position,
+    token_count,
+  }, context);
+
+  return result;
+}
+
+/**
+ * kb-delete-point: 删除知识点
+ */
+async function kbDeletePoint(params, config, context) {
+  const { kb_id, knowledge_id, point_id } = params;
+
+  if (!kb_id || !knowledge_id || !point_id) {
+    throw new Error('kb_id, knowledge_id and point_id are required');
+  }
+
+  const result = await apiRequest('DELETE', `/kb/${kb_id}/knowledges/${knowledge_id}/points/${point_id}`, null, context);
+  return result;
+}
+
 // ============================================================
 // 向量化
 // ============================================================
@@ -426,6 +504,40 @@ async function kbGetKnowledge(params, config, context) {
   return result;
 }
 
+/**
+ * kb-update-knowledge: 更新文章
+ */
+async function kbUpdateKnowledge(params, config, context) {
+  const { kb_id, knowledge_id, title, summary, status, position } = params;
+
+  if (!kb_id || !knowledge_id) {
+    throw new Error('kb_id and knowledge_id are required');
+  }
+
+  const result = await apiRequest('PUT', `/kb/${kb_id}/knowledges/${knowledge_id}`, {
+    title,
+    summary,
+    status,
+    position,
+  }, context);
+
+  return result;
+}
+
+/**
+ * kb-delete-knowledge: 删除文章
+ */
+async function kbDeleteKnowledge(params, config, context) {
+  const { kb_id, knowledge_id } = params;
+
+  if (!kb_id || !knowledge_id) {
+    throw new Error('kb_id and knowledge_id are required');
+  }
+
+  const result = await apiRequest('DELETE', `/kb/${kb_id}/knowledges/${knowledge_id}`, null, context);
+  return result;
+}
+
 // ============================================================
 // 辅助函数
 // ============================================================
@@ -455,8 +567,11 @@ async function apiRequest(method, apiPath, data, context) {
     options.headers['Authorization'] = `Bearer ${context.authToken}`;
   }
   if (context.userId) {
-    options.headers['X-User-Id'] = context.userId;
+    options.headers['X-User-Id'] = String(context.userId);
   }
+  // 内部服务调用认证
+  const internalSecret = process.env.INTERNAL_API_SECRET || 'internal-api-secret';
+  options.headers['X-Internal-Secret'] = internalSecret;
 
   return new Promise((resolve, reject) => {
     const req = httpModule.request(options, (res) => {
