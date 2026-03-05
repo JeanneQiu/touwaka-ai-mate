@@ -62,6 +62,38 @@
       </div>
     </div>
 
+    <!-- Pagination -->
+    <div v-if="totalPages > 1" class="pagination">
+      <button
+        class="page-btn"
+        :disabled="currentPage === 1"
+        @click="changePage(currentPage - 1)"
+      >
+        ← {{ $t('pagination.prev') }}
+      </button>
+      <div class="page-info">
+        <span>{{ $t('pagination.info', { total: totalCount }) }}</span>
+        <span class="page-numbers">
+          <button
+            v-for="page in visiblePages"
+            :key="page"
+            class="page-num"
+            :class="{ active: page === currentPage }"
+            @click="changePage(page)"
+          >
+            {{ page }}
+          </button>
+        </span>
+      </div>
+      <button
+        class="page-btn"
+        :disabled="currentPage === totalPages"
+        @click="changePage(currentPage + 1)"
+      >
+        {{ $t('pagination.next') }} →
+      </button>
+    </div>
+
     <!-- Create/Edit Dialog -->
     <div v-if="showCreateDialog || editingKb" class="dialog-overlay">
       <div class="dialog">
@@ -212,6 +244,12 @@ const formData = ref({
   embedding_model_id: '' as string | number,
 })
 
+// Pagination state
+const currentPage = ref(1)
+const pageSize = 12
+const totalCount = ref(0)
+const totalPages = ref(0)
+
 // 获取 embedding 模型列表
 const embeddingModels = computed(() => {
   return modelStore.models.filter(
@@ -229,13 +267,42 @@ const contextMenu = ref({
 
 // Computed
 const filteredKnowledgeBases = computed(() => {
-  if (!searchQuery.value) return kbStore.knowledgeBases
-  const query = searchQuery.value.toLowerCase()
-  return kbStore.knowledgeBases.filter(
-    kb =>
-      kb.name.toLowerCase().includes(query) ||
-      kb.description?.toLowerCase().includes(query)
-  )
+  // 如果有搜索词，在本地过滤
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase()
+    return kbStore.knowledgeBases.filter(
+      kb =>
+        kb.name.toLowerCase().includes(query) ||
+        kb.description?.toLowerCase().includes(query)
+    )
+  }
+  return kbStore.knowledgeBases
+})
+
+// 可见的页码
+const visiblePages = computed(() => {
+  const pages: number[] = []
+  const total = totalPages.value
+  const current = currentPage.value
+
+  // 显示当前页前后各2页
+  let start = Math.max(1, current - 2)
+  let end = Math.min(total, current + 2)
+
+  // 确保至少显示5页
+  if (end - start < 4) {
+    if (start === 1) {
+      end = Math.min(total, start + 4)
+    } else if (end === total) {
+      start = Math.max(1, end - 4)
+    }
+  }
+
+  for (let i = start; i <= end; i++) {
+    pages.push(i)
+  }
+
+  return pages
 })
 
 // Methods
@@ -284,6 +351,8 @@ const submitForm = async () => {
         description: formData.value.description,
         embedding_model_id: formData.value.embedding_model_id || null,
       })
+      // 创建后刷新当前页
+      await loadKbsWithPagination()
     }
     closeDialog()
   } catch (error) {
@@ -328,6 +397,8 @@ const confirmDelete = async () => {
   try {
     await kbStore.deleteKnowledgeBase(deletingKb.value.id)
     deletingKb.value = null
+    // 删除后刷新当前页
+    await loadKbsWithPagination()
   } catch (error) {
     console.error('Failed to delete knowledge base:', error)
   }
@@ -367,9 +438,31 @@ const handleClickOutside = () => {
   hideContextMenu()
 }
 
+// Pagination methods
+const loadKbsWithPagination = async () => {
+  try {
+    const response = await kbStore.loadKnowledgeBases({
+      page: currentPage.value,
+      limit: pageSize,
+    })
+    if (response && response.pagination) {
+      totalCount.value = response.pagination.total
+      totalPages.value = response.pagination.pages
+    }
+  } catch (error) {
+    console.error('Failed to load knowledge bases:', error)
+  }
+}
+
+const changePage = async (page: number) => {
+  if (page < 1 || page > totalPages.value) return
+  currentPage.value = page
+  await loadKbsWithPagination()
+}
+
 // Lifecycle
 onMounted(() => {
-  kbStore.loadKnowledgeBases()
+  loadKbsWithPagination()
   modelStore.loadModels() // 加载模型列表
   document.addEventListener('click', handleClickOutside)
 })
@@ -892,5 +985,75 @@ onUnmounted(() => {
 .kb-grid::-webkit-scrollbar-thumb {
   background: var(--border-color, #e0e0e0);
   border-radius: 3px;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0;
+  margin-top: auto;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+}
+
+.page-btn {
+  padding: 8px 16px;
+  background: var(--secondary-bg, #f5f5f5);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: var(--primary-light, #e3f2fd);
+  border-color: var(--primary-color, #2196f3);
+  color: var(--primary-color, #2196f3);
+}
+
+.page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+}
+
+.page-numbers {
+  display: flex;
+  gap: 4px;
+}
+
+.page-num {
+  min-width: 32px;
+  height: 32px;
+  padding: 4px 8px;
+  background: white;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.page-num:hover {
+  border-color: var(--primary-color, #2196f3);
+  color: var(--primary-color, #2196f3);
+}
+
+.page-num.active {
+  background: var(--primary-color, #2196f3);
+  border-color: var(--primary-color, #2196f3);
+  color: white;
 }
 </style>
