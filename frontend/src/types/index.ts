@@ -198,7 +198,7 @@ export enum ErrorCode {
 // 分页参数
 export interface PaginationParams {
   page?: number
-  limit?: number
+  pageSize?: number
   sort_by?: string
   sort_order?: 'asc' | 'desc'
 }
@@ -210,6 +210,12 @@ export interface PaginatedResponse<T> {
   page: number
   limit: number
   total_pages: number
+  pagination?: {
+    page: number
+    size: number
+    total: number
+    pages: number
+  }
 }
 
 // 聊天请求
@@ -647,7 +653,7 @@ export interface TaskFile {
  * 知识库（匹配后端 knowledge_bases 表）
  */
 export interface KnowledgeBase {
-  id: number
+  id: string | number
   name: string
   description?: string
   owner_id: string
@@ -675,9 +681,9 @@ export type KnowledgeSourceType = 'file' | 'web' | 'manual'
  * 文章（匹配后端 knowledges 表，树状结构）
  */
 export interface Knowledge {
-  id: number
-  kb_id: number
-  parent_id?: number
+  id: string | number
+  kb_id: string | number
+  parent_id?: string | number
   title: string
   summary?: string
   source_type: KnowledgeSourceType
@@ -699,8 +705,8 @@ export interface Knowledge {
  * 知识点（匹配后端 knowledge_points 表）
  */
 export interface KnowledgePoint {
-  id: number
-  knowledge_id: number
+  id: string | number
+  knowledge_id: string | number
   title?: string
   content: string
   context?: string
@@ -720,9 +726,9 @@ export type KnowledgeRelationType = 'depends_on' | 'references' | 'related_to' |
  * 知识点关联（匹配后端 knowledge_relations 表）
  */
 export interface KnowledgeRelation {
-  id: number
-  source_id: number
-  target_id: number
+  id: string | number
+  source_id: string | number
+  target_id: string | number
   relation_type: KnowledgeRelationType
   confidence: number
   created_by: 'llm' | 'manual'
@@ -793,7 +799,7 @@ export interface UpdateKnowledgePointRequest {
  */
 export interface KnowledgeSearchRequest {
   query: string
-  kb_id?: number
+  kb_id?: string | number
   top_k?: number
   threshold?: number
 }
@@ -804,6 +810,7 @@ export interface KnowledgeSearchRequest {
 export interface KnowledgeSearchResult {
   point: KnowledgePoint
   knowledge: Knowledge
+  knowledge_base?: KnowledgeBase
   score: number
 }
 
@@ -812,7 +819,7 @@ export interface KnowledgeSearchResult {
  */
 export interface ExpertKnowledgeConfig {
   enabled: boolean
-  kb_id?: number
+  kb_id?: string | number
   top_k?: number
   threshold?: number
   max_tokens?: number

@@ -423,7 +423,7 @@ export const knowledgeBaseApi = {
     apiRequest<PaginatedResponse<KnowledgeBase>>(apiClient.get('/kb', { params })),
 
   // 获取知识库详情
-  getKnowledgeBase: (id: number) =>
+  getKnowledgeBase: (id: string | number) =>
     apiRequest<KnowledgeBase>(apiClient.get(`/kb/${id}`)),
 
   // 创建知识库
@@ -431,64 +431,81 @@ export const knowledgeBaseApi = {
     apiRequest<KnowledgeBase>(apiClient.post('/kb', data)),
 
   // 更新知识库
-  updateKnowledgeBase: (id: number, data: UpdateKnowledgeBaseRequest) =>
+  updateKnowledgeBase: (id: string | number, data: UpdateKnowledgeBaseRequest) =>
     apiRequest<KnowledgeBase>(apiClient.put(`/kb/${id}`, data)),
 
   // 删除知识库
-  deleteKnowledgeBase: (id: number) =>
+  deleteKnowledgeBase: (id: string | number) =>
     apiRequest<void>(apiClient.delete(`/kb/${id}`)),
 
   // ========== 文章管理 ==========
 
   // 获取文章树
-  getKnowledgeTree: (kbId: number) =>
+  getKnowledgeTree: (kbId: string | number) =>
     apiRequest<Knowledge[]>(apiClient.get(`/kb/${kbId}/knowledges/tree`)),
 
   // 获取文章详情
-  getKnowledge: (kbId: number, knowledgeId: number) =>
+  getKnowledge: (kbId: string | number, knowledgeId: string | number) =>
     apiRequest<Knowledge>(apiClient.get(`/kb/${kbId}/knowledges/${knowledgeId}`)),
 
   // 创建文章
-  createKnowledge: (kbId: number, data: CreateKnowledgeRequest) =>
+  createKnowledge: (kbId: string | number, data: CreateKnowledgeRequest) =>
     apiRequest<Knowledge>(apiClient.post(`/kb/${kbId}/knowledges`, data)),
 
   // 更新文章
-  updateKnowledge: (kbId: number, knowledgeId: number, data: UpdateKnowledgeRequest) =>
+  updateKnowledge: (kbId: string | number, knowledgeId: string | number, data: UpdateKnowledgeRequest) =>
     apiRequest<Knowledge>(apiClient.put(`/kb/${kbId}/knowledges/${knowledgeId}`, data)),
 
   // 删除文章
-  deleteKnowledge: (kbId: number, knowledgeId: number) =>
+  deleteKnowledge: (kbId: string | number, knowledgeId: string | number) =>
     apiRequest<void>(apiClient.delete(`/kb/${kbId}/knowledges/${knowledgeId}`)),
 
   // ========== 知识点管理 ==========
 
   // 获取知识点列表
-  getKnowledgePoints: (kbId: number, knowledgeId: number, params?: PaginationParams) =>
+  getKnowledgePoints: (kbId: string | number, knowledgeId: string | number, params?: PaginationParams) =>
     apiRequest<PaginatedResponse<KnowledgePoint>>(apiClient.get(`/kb/${kbId}/knowledges/${knowledgeId}/points`, { params })),
 
   // 获取知识点详情
-  getKnowledgePoint: (kbId: number, knowledgeId: number, pointId: number) =>
+  getKnowledgePoint: (kbId: string | number, knowledgeId: string | number, pointId: string | number) =>
     apiRequest<KnowledgePoint>(apiClient.get(`/kb/${kbId}/knowledges/${knowledgeId}/points/${pointId}`)),
 
   // 创建知识点
-  createKnowledgePoint: (kbId: number, knowledgeId: number, data: CreateKnowledgePointRequest) =>
+  createKnowledgePoint: (kbId: string | number, knowledgeId: string | number, data: CreateKnowledgePointRequest) =>
     apiRequest<KnowledgePoint>(apiClient.post(`/kb/${kbId}/knowledges/${knowledgeId}/points`, data)),
 
   // 更新知识点
-  updateKnowledgePoint: (kbId: number, knowledgeId: number, pointId: number, data: UpdateKnowledgePointRequest) =>
+  updateKnowledgePoint: (kbId: string | number, knowledgeId: string | number, pointId: string | number, data: UpdateKnowledgePointRequest) =>
     apiRequest<KnowledgePoint>(apiClient.put(`/kb/${kbId}/knowledges/${knowledgeId}/points/${pointId}`, data)),
 
   // 删除知识点
-  deleteKnowledgePoint: (kbId: number, knowledgeId: number, pointId: number) =>
+  deleteKnowledgePoint: (kbId: string | number, knowledgeId: string | number, pointId: string | number) =>
     apiRequest<void>(apiClient.delete(`/kb/${kbId}/knowledges/${knowledgeId}/points/${pointId}`)),
 
   // ========== 搜索 ==========
 
   // 语义搜索（单个知识库内）
-  search: (kbId: number, data: KnowledgeSearchRequest) =>
+  search: (kbId: string | number, data: KnowledgeSearchRequest) =>
     apiRequest<KnowledgeSearchResult[]>(apiClient.post(`/kb/${kbId}/search`, data)),
 
   // 全局语义搜索（跨所有知识库）
   globalSearch: (data: KnowledgeSearchRequest) =>
     apiRequest<KnowledgeSearchResult[]>(apiClient.post('/kb/search', data)),
+}
+
+// ============================================
+// 图片上传相关 API
+// ============================================
+
+export const uploadApi = {
+  // 上传图片
+  uploadImage: (file: File) => {
+    const formData = new FormData()
+    formData.append('image', file)
+    return apiRequest<{ url: string; filename: string; size: number }>(
+      apiClient.post('/upload/image', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+    )
+  },
 }
