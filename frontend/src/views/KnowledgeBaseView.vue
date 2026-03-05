@@ -40,59 +40,61 @@
       </button>
     </div>
 
-    <!-- Knowledge Base Grid -->
-    <div v-else class="kb-grid">
-      <!-- KB Cards -->
-      <div
-        v-for="kb in kbStore.knowledgeBases"
-        :key="kb.id"
-        class="kb-card"
-        @click="openKbDetail(kb)"
-        @contextmenu.prevent="showContextMenu($event, kb)"
-      >
-        <div class="kb-card-icon">{{ getKbIcon(kb) }}</div>
-        <div class="kb-card-name">{{ kb.name }}</div>
-        <div class="kb-card-desc" v-if="kb.description">{{ kb.description }}</div>
-        <div class="kb-card-stats">
-          <span>{{ $t('knowledgeBase.pointCount', { count: kb.point_count || 0 }) }}</span>
-        </div>
-        <div class="kb-card-time">
-          {{ formatUpdatedTime(kb.updated_at) }}
+    <!-- Knowledge Base Content with Pagination -->
+    <template v-else>
+      <div class="kb-grid">
+        <!-- KB Cards -->
+        <div
+          v-for="kb in kbStore.knowledgeBases"
+          :key="kb.id"
+          class="kb-card"
+          @click="openKbDetail(kb)"
+          @contextmenu.prevent="showContextMenu($event, kb)"
+        >
+          <div class="kb-card-icon">{{ getKbIcon(kb) }}</div>
+          <div class="kb-card-name">{{ kb.name }}</div>
+          <div class="kb-card-desc" v-if="kb.description">{{ kb.description }}</div>
+          <div class="kb-card-stats">
+            <span>{{ $t('knowledgeBase.pointCount', { count: kb.point_count || 0 }) }}</span>
+          </div>
+          <div class="kb-card-time">
+            {{ formatUpdatedTime(kb.updated_at) }}
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Pagination -->
-    <div v-if="totalPages > 1" class="pagination">
-      <button
-        class="page-btn"
-        :disabled="currentPage === 1"
-        @click="changePage(currentPage - 1)"
-      >
-        ← {{ $t('pagination.prev') }}
-      </button>
-      <div class="page-info">
-        <span>{{ $t('pagination.info', { total: totalCount }) }}</span>
-        <span class="page-numbers">
-          <button
-            v-for="page in visiblePages"
-            :key="page"
-            class="page-num"
-            :class="{ active: page === currentPage }"
-            @click="changePage(page)"
-          >
-            {{ page }}
-          </button>
-        </span>
+      <!-- Pagination -->
+      <div v-if="totalPages > 1" class="pagination">
+        <button
+          class="page-btn"
+          :disabled="currentPage === 1"
+          @click="changePage(currentPage - 1)"
+        >
+          ← {{ $t('pagination.prev') }}
+        </button>
+        <div class="page-info">
+          <span>{{ $t('pagination.info', { total: totalCount }) }}</span>
+          <span class="page-numbers">
+            <button
+              v-for="page in visiblePages"
+              :key="page"
+              class="page-num"
+              :class="{ active: page === currentPage }"
+              @click="changePage(page)"
+            >
+              {{ page }}
+            </button>
+          </span>
+        </div>
+        <button
+          class="page-btn"
+          :disabled="currentPage === totalPages"
+          @click="changePage(currentPage + 1)"
+        >
+          {{ $t('pagination.next') }} →
+        </button>
       </div>
-      <button
-        class="page-btn"
-        :disabled="currentPage === totalPages"
-        @click="changePage(currentPage + 1)"
-      >
-        {{ $t('pagination.next') }} →
-      </button>
-    </div>
+    </template>
 
     <!-- Create/Edit Dialog -->
     <div v-if="showCreateDialog || editingKb" class="dialog-overlay">
