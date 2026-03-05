@@ -355,9 +355,10 @@ export const useKnowledgeBaseStore = defineStore('knowledgeBase', () => {
   // ========== Actions - 搜索 ==========
 
   /**
-   * 语义搜索
+   * 语义搜索（单个知识库内）
+   * 注意：默认阈值设为 0.1，因为 all-MiniLM-L6-v2 的相似度通常在 0.1-0.5 之间
    */
-  const search = async (kbId: number, query: string, topK = 5, threshold = 0.7) => {
+  const search = async (kbId: number, query: string, topK = 5, threshold = 0.1) => {
     isSearching.value = true
     error.value = null
     try {
@@ -378,6 +379,29 @@ export const useKnowledgeBaseStore = defineStore('knowledgeBase', () => {
   }
 
   /**
+   * 全局语义搜索（跨所有知识库）
+   * 注意：默认阈值设为 0.1，因为 all-MiniLM-L6-v2 的相似度通常在 0.1-0.5 之间
+   */
+  const globalSearch = async (query: string, topK = 10, threshold = 0.1) => {
+    isSearching.value = true
+    error.value = null
+    try {
+      const results = await knowledgeBaseApi.globalSearch({
+        query,
+        top_k: topK,
+        threshold,
+      })
+      searchResults.value = results
+      return results
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Global search failed'
+      throw err
+    } finally {
+      isSearching.value = false
+    }
+  }
+
+  /**
    * 清除搜索结果
    */
   const clearSearchResults = () => {
@@ -389,42 +413,6 @@ export const useKnowledgeBaseStore = defineStore('knowledgeBase', () => {
    */
   const clearError = () => {
     error.value = null
-  }
-
-  /**
-   * 获取未向量化的知识点
-   */
-  const getPointsWithoutEmbedding = async (kbId: number) => {
-    error.value = null
-    try {
-      const points = await knowledgeBaseApi.getPointsWithoutEmbedding(kbId)
-      return points
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to get points without embedding'
-      throw err
-    }
-  }
-
-  /**
-   * 批量生成嵌入向量
-   */
-  const batchEmbedPoints = async (kbId: number, pointIds: number[]) => {
-    if (!currentKb.value) {
-      error.value = 'No knowledge base selected'
-      return { total: 0, success: 0, failed: 0, results: [] }
-    }
-
-    isLoading.value = true
-    error.value = null
-    try {
-      const result = await knowledgeBaseApi.batchEmbedPoints(kbId, pointIds)
-      return result
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to batch embed points'
-      throw err
-    } finally {
-      isLoading.value = false
-    }
   }
 
   return {
@@ -470,11 +458,8 @@ export const useKnowledgeBaseStore = defineStore('knowledgeBase', () => {
 
     // Actions - 搜索
     search,
+    globalSearch,
     clearSearchResults,
-
-    // Actions - 批量嵌入
-    batchEmbedPoints,
-    getPointsWithoutEmbedding,
 
     // Utilities
     clearError,

@@ -484,17 +484,11 @@ export const knowledgeBaseApi = {
 
   // ========== 搜索 ==========
 
-  // 语义搜索
+  // 语义搜索（单个知识库内）
   search: (kbId: number, data: KnowledgeSearchRequest) =>
     apiRequest<KnowledgeSearchResult[]>(apiClient.post(`/kb/${kbId}/search`, data)),
 
-  // 获取未向量化的知识点
-  getPointsWithoutEmbedding: (kbId: number) =>
-    apiRequest<KnowledgePoint[]>(apiClient.get(`/kb/${kbId}/points-without-embedding`)),
-
-  // 批量生成嵌入向量
-  batchEmbedPoints: (kbId: number, pointIds: number[]) =>
-    apiRequest<{ total: number; success: number; failed: number; results: { success: boolean; point_id: number }[] }>(
-      apiClient.post(`/kb/${kbId}/points/batch-embed`, { point_ids: pointIds }),
-    ),
+  // 全局语义搜索（跨所有知识库）
+  globalSearch: (data: KnowledgeSearchRequest) =>
+    apiRequest<KnowledgeSearchResult[]>(apiClient.post('/kb/search', data)),
 }

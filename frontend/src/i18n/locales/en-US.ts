@@ -647,6 +647,11 @@ export default {
     newArticle: 'New Article',
     search: 'Search',
     searchHint: 'Enter keywords for semantic search...',
+    globalSearch: 'Global Search',
+    searchResult: {
+      title: 'Search Results',
+      empty: 'No matching knowledge points found',
+    },
 
     // Article tree
     articleTree: 'Article Tree',
@@ -708,6 +713,8 @@ export default {
       updateFailed: 'Failed to update knowledge point',
       deleteConfirm: 'Are you sure you want to delete this knowledge point?',
       tokenCount: '{count} tokens',
+      vectorized: 'Vectorized',
+      notVectorized: 'Not Vectorized',
     },
 
     // Search results

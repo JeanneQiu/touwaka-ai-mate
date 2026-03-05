@@ -18,6 +18,9 @@ export default (controller) => {
   // 复杂查询知识库列表
   router.post('/query', authenticate(), controller.queryKbs.bind(controller));
 
+  // 全局语义搜索（跨所有知识库）
+  router.post('/search', authenticate(), controller.globalSearch.bind(controller));
+
   // 获取知识库列表
   router.get('/', authenticate(), controller.listKbs.bind(controller));
 
@@ -77,12 +80,6 @@ export default (controller) => {
 
   // 获取知识点（包含 embedding）
   router.get('/:kb_id/points/:id', authenticate(), controller.getPointWithEmbedding.bind(controller));
-
-  // 获取未向量化的知识点列表
-  router.get('/:kb_id/points-without-embedding', authenticate(), controller.getPointsWithoutEmbedding.bind(controller));
-
-  // 批量生成知识点嵌入向量
-  router.post('/:kb_id/points/batch-embed', authenticate(), controller.embedBatch.bind(controller));
 
   return router;
 };

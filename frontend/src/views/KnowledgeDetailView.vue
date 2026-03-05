@@ -10,10 +10,6 @@
         <h1 class="kb-title">{{ kbStore.currentKb?.name }}</h1>
       </div>
       <div class="header-actions">
-        <button class="btn-action" @click="batchEmbedPoints" :disabled="isEmbedding">
-          <span>{{ isEmbedding ? '⏳' : '🔮' }}</span>
-          {{ isEmbedding ? $t('knowledgeBase.embedding') : $t('knowledgeBase.batchEmbed') }}
-        </button>
         <button class="btn-action" @click="showSearchDialog = true">
           <span>🔍</span>
           {{ $t('knowledgeBase.search') }}
@@ -112,9 +108,20 @@
                 v-for="point in kbStore.currentPoints"
                 :key="point.id"
                 class="point-card"
+                :class="{ 'point-vectorized': (point as any).is_vectorized }"
                 @click="selectPoint(point)"
               >
-                <div v-if="point.title" class="point-title">{{ point.title }}</div>
+                <div class="point-header">
+                  <div v-if="point.title" class="point-title">{{ point.title }}</div>
+                  <div class="point-status">
+                    <span v-if="(point as any).is_vectorized" class="status-badge vectorized" :title="$t('knowledgeBase.point.vectorized')">
+                      ✅ {{ $t('knowledgeBase.point.vectorized') }}
+                    </span>
+                    <span v-else class="status-badge not-vectorized" :title="$t('knowledgeBase.point.notVectorized')">
+                      ⏳ {{ $t('knowledgeBase.point.notVectorized') }}
+                    </span>
+                  </div>
+                </div>
                 <div class="point-content" v-html="renderMarkdown(point.content)"></div>
                 <div class="point-meta">
                   <span>{{ $t('knowledgeBase.point.tokenCount', { count: point.token_count }) }}</span>
@@ -209,41 +216,6 @@
       </div>
     </div>
 
-    <!-- Batch Embed Scope Dialog -->
-    <div v-if="showBatchEmbedDialog" class="dialog-overlay">
-      <div class="dialog">
-        <h3 class="dialog-title">{{ $t('knowledgeBase.batchEmbedScope.title') }}</h3>
-        <div class="dialog-body">
-          <p class="dialog-hint">{{ $t('knowledgeBase.batchEmbedScope.hint') }}</p>
-          <div class="form-group">
-            <label class="form-radio">
-              <input type="radio" v-model="batchEmbedScope" value="all" />
-              <span>{{ $t('knowledgeBase.batchEmbedScope.entireKB') }}</span>
-            </label>
-            <label class="form-radio">
-              <input type="radio" v-model="batchEmbedScope" value="article" />
-              <span>{{ $t('knowledgeBase.batchEmbedScope.currentArticle') }}</span>
-            </label>
-          </div>
-          <div v-if="batchEmbedScope === 'article'" class="form-group">
-            <label class="form-label">{{ $t('knowledgeBase.batchEmbedScope.selectArticle') }}</label>
-            <select v-model="batchEmbedArticleId" class="form-select">
-              <option :value="undefined">{{ $t('knowledgeBase.batchEmbedScope.selectArticlePlaceholder') }}</option>
-              <option v-for="k in knowledgeTreeForDialog" :key="k.id" :value="k.id">
-                {{ k.title }}
-              </option>
-            </select>
-          </div>
-        </div>
-        <div class="dialog-footer">
-          <button class="btn-cancel" @click="closeBatchEmbedDialog">{{ $t('common.cancel') }}</button>
-          <button class="btn-primary" @click="executeBatchEmbed" :disabled="isEmbedding || (batchEmbedScope === 'article' && !batchEmbedArticleId)">
-            {{ isEmbedding ? $t('knowledgeBase.embedding') : $t('knowledgeBase.batchEmbed') }}
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- Point Dialog -->
     <div v-if="showPointDialog" class="dialog-overlay">
       <div class="dialog dialog-large">
@@ -319,28 +291,6 @@ const editingPoint = ref<KnowledgePoint | null>(null)
 const searchQuery = ref('')
 const hasSearched = ref(false)
 
-// Embedding state
-const isEmbedding = ref(false)
-const showBatchEmbedDialog = ref(false)
-const batchEmbedScope = ref<'all' | 'article'>('all')
-const batchEmbedArticleId = ref<number | undefined>(undefined)
-
-// Computed for dialog
-const knowledgeTreeForDialog = computed(() => {
-  // Flatten tree for dialog selection
-  const flatten = (nodes: Knowledge[]): Knowledge[] => {
-    const result: Knowledge[] = []
-    for (const node of nodes) {
-      result.push(node)
-      if (node.children && node.children.length > 0) {
-        result.push(...flatten(node.children))
-      }
-    }
-    return result
-  }
-  return flatten(kbStore.knowledgeTree)
-})
-
 // Forms
 const articleForm = ref({
   title: '',
@@ -406,65 +356,6 @@ const expandAll = () => {
 const collapseAll = () => {
   forceExpand.value = false
   treeKey.value++ // Force re-render
-}
-
-// Batch embed - show scope selection dialog
-const batchEmbedPoints = () => {
-  showBatchEmbedDialog.value = true
-  batchEmbedScope.value = 'all'
-  batchEmbedArticleId.value = undefined
-}
-
-// Close batch embed dialog
-const closeBatchEmbedDialog = () => {
-  showBatchEmbedDialog.value = false
-}
-
-// Execute batch embed based on selected scope
-const executeBatchEmbed = async () => {
-  if (isEmbedding.value) return
-
-  isEmbedding.value = true
-  showBatchEmbedDialog.value = false
-
-  try {
-    let pointIds: number[] = []
-
-    if (batchEmbedScope.value === 'all') {
-      // Fetch all points without embedding from the entire knowledge base
-      const pointsWithoutEmbedding = await kbStore.getPointsWithoutEmbedding(kbId.value)
-      if (pointsWithoutEmbedding && pointsWithoutEmbedding.length > 0) {
-        pointIds = pointsWithoutEmbedding.map((p: KnowledgePoint) => p.id)
-      }
-    } else if (batchEmbedScope.value === 'article' && batchEmbedArticleId.value) {
-      // Get points from the selected article only
-      const knowledge = await kbStore.loadKnowledge(kbId.value, batchEmbedArticleId.value)
-      const points = kbStore.currentPoints.filter((p: KnowledgePoint) => !p.embedding)
-      pointIds = points.map((p: KnowledgePoint) => p.id)
-    }
-
-    if (pointIds.length === 0) {
-      alert(t('knowledgeBase.noPointsToEmbed') || 'No knowledge points to embed')
-      return
-    }
-
-    const response = await kbStore.batchEmbedPoints(kbId.value, pointIds)
-
-    if (response.success > 0) {
-      alert(t('knowledgeBase.embedSuccess', { count: response.success }) || `Successfully embedded ${response.success} points`)
-      // Reload points to get updated embeddings
-      if (selectedKnowledge.value) {
-        await kbStore.loadKnowledge(kbId.value, selectedKnowledge.value.id)
-      }
-    } else {
-      alert(t('knowledgeBase.embedFailed') || 'Failed to embed points')
-    }
-  } catch (error) {
-    console.error('Failed to batch embed points:', error)
-    alert(t('knowledgeBase.embedError') || 'Error embedding points')
-  } finally {
-    isEmbedding.value = false
-  }
 }
 
 // Article operations
@@ -844,16 +735,50 @@ onMounted(async () => {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
+  border-left: 3px solid transparent;
 }
 
 .point-card:hover {
   background: var(--primary-light, #e3f2fd);
 }
 
+.point-card.point-vectorized {
+  border-left-color: #4caf50;
+}
+
+.point-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
 .point-title {
   font-weight: 600;
-  margin-bottom: 8px;
   color: var(--text-primary, #333);
+  flex: 1;
+}
+
+.point-status {
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.status-badge.vectorized {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-badge.not-vectorized {
+  background: #fff3e0;
+  color: #e65100;
 }
 
 .point-content {

@@ -15,7 +15,15 @@
         type="text"
         class="search-input"
         :placeholder="$t('knowledgeBase.searchPlaceholder')"
+        @keyup.enter="performGlobalSearch"
       />
+      <button
+        class="btn-search"
+        @click="performGlobalSearch"
+        :disabled="!searchQuery.trim() || kbStore.isSearching"
+      >
+        🔍 {{ kbStore.isSearching ? $t('common.loading') : $t('knowledgeBase.search') }}
+      </button>
     </div>
 
     <!-- Loading -->
@@ -132,6 +140,47 @@
         </div>
       </div>
     </div>
+
+    <!-- Global Search Dialog -->
+    <div v-if="showGlobalSearchDialog" class="dialog-overlay">
+      <div class="dialog dialog-large">
+        <h3 class="dialog-title">{{ $t('knowledgeBase.globalSearch') || '全局搜索' }}</h3>
+        <div class="dialog-body">
+          <div v-if="kbStore.isSearching" class="search-loading">
+            {{ $t('common.loading') }}
+          </div>
+
+          <div v-else-if="kbStore.searchResults.length > 0" class="search-results">
+            <h4>{{ $t('knowledgeBase.searchResult.title') }} ({{ kbStore.searchResults.length }})</h4>
+            <div
+              v-for="result in kbStore.searchResults"
+              :key="result.point.id"
+              class="search-result-item"
+            >
+              <div class="result-score">
+                {{ Math.round(result.score * 100) }}%
+              </div>
+              <div class="result-content">
+                <div class="result-kb" v-if="result.knowledge_base">
+                  📚 {{ result.knowledge_base.name }}
+                </div>
+                <div class="result-location" v-if="result.knowledge">
+                  📖 {{ result.knowledge.title }}
+                </div>
+                <div class="result-text" v-html="renderMarkdown(result.point.content)"></div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="hasGlobalSearched" class="search-empty">
+            {{ $t('knowledgeBase.searchResult.empty') }}
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn-cancel" @click="closeGlobalSearchDialog">{{ $t('common.close') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -141,6 +190,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useKnowledgeBaseStore } from '@/stores/knowledgeBase'
 import { useModelStore } from '@/stores/model'
+import { marked } from 'marked'
 import type { KnowledgeBase } from '@/types'
 
 const { t } = useI18n()
@@ -154,6 +204,8 @@ const showCreateDialog = ref(false)
 const editingKb = ref<KnowledgeBase | null>(null)
 const deletingKb = ref<KnowledgeBase | null>(null)
 const isSubmitting = ref(false)
+const showGlobalSearchDialog = ref(false)
+const hasGlobalSearched = ref(false)
 const formData = ref({
   name: '',
   description: '',
@@ -281,6 +333,35 @@ const confirmDelete = async () => {
   }
 }
 
+// Global search
+const performGlobalSearch = async () => {
+  if (!searchQuery.value.trim()) return
+
+  hasGlobalSearched.value = false
+  showGlobalSearchDialog.value = true
+
+  try {
+    await kbStore.globalSearch(searchQuery.value, 10, 0.5)
+    hasGlobalSearched.value = true
+  } catch (error) {
+    console.error('Global search failed:', error)
+  }
+}
+
+const closeGlobalSearchDialog = () => {
+  showGlobalSearchDialog.value = false
+  hasGlobalSearched.value = false
+  kbStore.clearSearchResults()
+}
+
+const renderMarkdown = (content: string) => {
+  try {
+    return marked(content)
+  } catch {
+    return content
+  }
+}
+
 // Click outside to close context menu
 const handleClickOutside = () => {
   hideContextMenu()
@@ -345,6 +426,102 @@ onUnmounted(() => {
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
   font-size: 14px;
+}
+
+.btn-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--primary-color, #2196f3) 0%, #1976d2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+  white-space: nowrap;
+}
+
+.btn-search:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(33, 150, 243, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-search:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Global Search Dialog */
+.dialog-large {
+  max-width: 640px;
+}
+
+.search-loading,
+.search-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-secondary, #666);
+}
+
+.search-results h4 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+}
+
+.search-result-item {
+  display: flex;
+  gap: 16px;
+  padding: 12px;
+  background: var(--secondary-bg, #f8f9fa);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.result-score {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary-color, #2196f3);
+  min-width: 48px;
+}
+
+.result-content {
+  flex: 1;
+}
+
+.result-kb {
+  font-size: 12px;
+  color: var(--text-tertiary, #999);
+  margin-bottom: 4px;
+}
+
+.result-location {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #333);
+  margin-bottom: 4px;
+}
+
+.result-text {
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+  line-height: 1.5;
+}
+
+.result-text :deep(p) {
+  margin: 0 0 8px 0;
+}
+
+.result-text :deep(code) {
+  background: var(--border-color, #e0e0e0);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
 }
 
 /* Loading and Empty */

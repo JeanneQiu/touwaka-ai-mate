@@ -127,6 +127,7 @@ class KnowledgeBaseController {
 
   /**
    * 创建知识库
+   * 使用随机数字作为 ID
    */
   async createKb(ctx) {
     try {
@@ -138,12 +139,36 @@ class KnowledgeBaseController {
         return;
       }
 
+      // 生成随机 ID（8位数字）
+      const generateRandomId = () => {
+        return Math.floor(10000000 + Math.random() * 90000000);
+      };
+
+      // 确保生成的 ID 不冲突
+      let newId = generateRandomId();
+      let exists = await this.KnowledgeBase.findOne({ where: { id: newId } });
+      let attempts = 0;
+      while (exists && attempts < 10) {
+        newId = generateRandomId();
+        exists = await this.KnowledgeBase.findOne({ where: { id: newId } });
+        attempts++;
+      }
+
+      if (exists) {
+        ctx.error('无法生成唯一的知识库 ID，请重试', 500);
+        return;
+      }
+
+      // 确定 embedding_model_id：优先使用用户选择的模型，否则使用 'local'
+      const finalEmbeddingModelId = embedding_model_id || 'local';
+
       const kb = await this.KnowledgeBase.create({
+        id: newId,
         name,
         description: description || null,
         owner_id: ctx.state.userId,
-        embedding_model_id: embedding_model_id || null,
-        embedding_dim: embedding_dim || 1536,
+        embedding_model_id: finalEmbeddingModelId,
+        embedding_dim: embedding_dim || 384, // all-MiniLM-L6-v2 默认维度
         is_public: false,
       });
 
@@ -563,7 +588,7 @@ class KnowledgeBaseController {
   // ==================== 知识点 CRUD ====================
 
   /**
-   * 获取文章的知识点列表
+   * 获取文章的知识点列表（包含向量化状态）
    */
   async listPoints(ctx) {
     try {
@@ -598,13 +623,20 @@ class KnowledgeBaseController {
         order: [['position', 'ASC']],
         limit: parseInt(pageSize),
         offset,
-        // 不返回 embedding 字段（太大）
-        attributes: { exclude: ['embedding'] },
         raw: true,
       });
 
+      // 处理结果：添加 is_vectorized 字段，移除 embedding 字段
+      const items = rows.map(point => {
+        const { embedding, ...rest } = point;
+        return {
+          ...rest,
+          is_vectorized: !!embedding,
+        };
+      });
+
       ctx.success({
-        items: rows,
+        items,
         pagination: {
           page: parseInt(page),
           size: parseInt(pageSize),
@@ -619,7 +651,7 @@ class KnowledgeBaseController {
   }
 
   /**
-   * 创建知识点
+   * 创建知识点（自动生成向量）
    */
   async createPoint(ctx) {
     try {
@@ -657,6 +689,7 @@ class KnowledgeBaseController {
         where: { knowledge_id },
       }) || 0;
 
+      // 创建知识点
       const point = await this.KnowledgePoint.create({
         knowledge_id: parseInt(knowledge_id),
         title: title || null,
@@ -666,6 +699,25 @@ class KnowledgeBaseController {
         token_count: 0,
       });
 
+      // 自动生成嵌入向量
+      let is_vectorized = false;
+      try {
+        const text = content || title;
+        if (text) {
+          const embedding = await this.generateQueryEmbedding(text, kb.embedding_model_id);
+          if (embedding) {
+            await this.KnowledgePoint.update(
+              { embedding: JSON.stringify(embedding) },
+              { where: { id: point.id } }
+            );
+            is_vectorized = true;
+            logger.info(`[KB] Auto-generated embedding for point ${point.id}`);
+          }
+        }
+      } catch (embedError) {
+        logger.warn(`[KB] Failed to auto-generate embedding for point ${point.id}:`, embedError.message);
+      }
+
       const result = await this.KnowledgePoint.findOne({
         where: { id: point.id },
         attributes: { exclude: ['embedding'] },
@@ -673,7 +725,7 @@ class KnowledgeBaseController {
       });
 
       ctx.status = 201;
-      ctx.success(result, '知识点创建成功');
+      ctx.success({ ...result, is_vectorized }, '知识点创建成功');
     } catch (error) {
       logger.error('Create knowledge point error:', error);
       ctx.error('创建知识点失败', 500);
@@ -818,58 +870,6 @@ class KnowledgeBaseController {
   }
 
   /**
-   * 获取未向量化的知识点列表
-   */
-  async getPointsWithoutEmbedding(ctx) {
-    try {
-      this.ensureModels();
-      const { kb_id } = ctx.params;
-      const { limit = 100 } = ctx.query;
-
-      // 验证知识库权限
-      const kb = await this.KnowledgeBase.findOne({
-        where: { id: kb_id, owner_id: ctx.state.userId },
-        raw: true,
-      });
-      if (!kb) {
-        ctx.error('知识库不存在或无权限', 404);
-        return;
-      }
-
-      // 获取知识库下的所有知识点（未向量化）
-      const { Op } = this.db.Sequelize;
-      const points = await this.KnowledgePoint.findAll({
-        where: {
-          embedding: null,
-        },
-        include: [{
-          model: this.Knowledge,
-          as: 'knowledge',
-          where: { kb_id },
-          attributes: ['id', 'title'],
-        }],
-        limit: parseInt(limit),
-        raw: true,
-      });
-
-      ctx.success({
-        items: points.map(p => ({
-          id: p.id,
-          knowledge_id: p.knowledge_id,
-          title: p.title,
-          content: p.content,
-          context: p.context,
-          knowledge_title: p['knowledge.title'],
-        })),
-        total: points.length,
-      });
-    } catch (error) {
-      logger.error('Get points without embedding error:', error);
-      ctx.error('获取未向量化知识点失败', 500);
-    }
-  }
-
-  /**
    * 删除知识点
    */
   async deletePoint(ctx) {
@@ -903,96 +903,6 @@ class KnowledgeBaseController {
     }
   }
 
-  /**
-   * 批量生成知识点嵌入向量
-   * POST /api/kb/:kb_id/embed-batch
-   */
-  async embedBatch(ctx) {
-    try {
-      this.ensureModels();
-      const { kb_id } = ctx.params;
-      const { point_ids } = ctx.request.body;
-
-      if (!Array.isArray(point_ids) || point_ids.length === 0) {
-        ctx.error('请提供知识点ID列表');
-        return;
-      }
-
-      // 限制批量处理大小，防止内存溢出
-      const MAX_BATCH_SIZE = 100;
-      if (point_ids.length > MAX_BATCH_SIZE) {
-        ctx.error(`批量处理数量超过限制（最大 ${MAX_BATCH_SIZE} 个），请分批处理`);
-        return;
-      }
-
-      // 获取知识库信息
-      const kb = await this.KnowledgeBase.findOne({
-        where: { id: kb_id, owner_id: ctx.state.userId },
-        raw: true,
-      });
-
-      if (!kb) {
-        ctx.error('知识库不存在');
-        return;
-      }
-
-      // 获取知识点
-      const points = await this.KnowledgePoint.findAll({
-        where: {
-          id: point_ids,
-        },
-        raw: true,
-      });
-
-      if (points.length === 0) {
-        ctx.error('没有找到符合条件的知识点');
-        return;
-      }
-
-      // 生成嵌入向量
-      const results = [];
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const point of points) {
-        try {
-          const text = point.content || point.title;
-          if (!text) {
-            failCount++;
-            results.push({ id: point.id, success: false, error: 'No content to embed' });
-            continue;
-          }
-
-          const embedding = await this.generateQueryEmbedding(text, kb.embedding_model_id);
-          if (embedding) {
-            await this.KnowledgePoint.update(
-              { embedding: JSON.stringify(embedding) },
-              { where: { id: point.id } }
-            );
-            successCount++;
-            results.push({ id: point.id, success: true });
-          } else {
-            failCount++;
-            results.push({ id: point.id, success: false, error: 'Failed to generate embedding' });
-          }
-        } catch (error) {
-          failCount++;
-          results.push({ id: point.id, success: false, error: error.message });
-        }
-      }
-
-      ctx.success({
-        total: point_ids.length,
-        success: successCount,
-        failed: failCount,
-        results,
-      });
-    } catch (error) {
-      logger.error('Batch embed points error:', error);
-      ctx.error('批量生成嵌入向量失败', 500);
-    }
-  }
-
   // ==================== 搜索功能 ====================
 
   /**
@@ -1003,7 +913,8 @@ class KnowledgeBaseController {
     try {
       this.ensureModels();
       const { kb_id } = ctx.params;
-      const { query, top_k = 5, threshold = 0.7 } = ctx.request.body;
+      // 注意：默认阈值设为 0.1，因为 all-MiniLM-L6-v2 的相似度通常在 0.1-0.5 之间
+      const { query, top_k = 5, threshold = 0.1 } = ctx.request.body;
 
       if (!query) {
         ctx.error('搜索查询不能为空');
@@ -1101,6 +1012,118 @@ class KnowledgeBaseController {
       logger.error('Search knowledge error:', error.message || error);
       logger.error('Search knowledge error stack:', error.stack);
       ctx.error('搜索失败: ' + (error.message || '未知错误'), 500);
+    }
+  }
+
+  /**
+   * 全局语义搜索知识点（跨所有知识库）
+   * POST /api/kb/search
+   */
+  async globalSearch(ctx) {
+    try {
+      this.ensureModels();
+      // 注意：默认阈值设为 0.1，因为 all-MiniLM-L6-v2 的相似度通常在 0.1-0.5 之间
+      const { query, top_k = 10, threshold = 0.1 } = ctx.request.body;
+
+      if (!query) {
+        ctx.error('搜索查询不能为空');
+        return;
+      }
+
+      // 获取用户所有知识库的 ID
+      const userKbs = await this.KnowledgeBase.findAll({
+        where: { owner_id: ctx.state.userId },
+        attributes: ['id', 'name', 'embedding_model_id'],
+        raw: true,
+      });
+
+      if (userKbs.length === 0) {
+        ctx.success([]);
+        return;
+      }
+
+      const kbIds = userKbs.map(kb => kb.id);
+      const kbMap = new Map(userKbs.map(kb => [kb.id, kb]));
+
+      // 获取这些知识库下的所有文章 ID
+      const knowledges = await this.Knowledge.findAll({
+        where: { kb_id: kbIds },
+        attributes: ['id', 'kb_id', 'title'],
+        raw: true,
+      });
+
+      if (knowledges.length === 0) {
+        ctx.success([]);
+        return;
+      }
+
+      const knowledgeIds = knowledges.map(k => k.id);
+      const knowledgeMap = new Map(knowledges.map(k => [k.id, k]));
+
+      // 获取所有有向量的知识点
+      const points = await this.KnowledgePoint.findAll({
+        where: {
+          knowledge_id: knowledgeIds,
+          embedding: { [Op.ne]: null },
+        },
+        raw: true,
+      });
+
+      if (points.length === 0) {
+        ctx.success([]);
+        return;
+      }
+
+      // 使用第一个知识库的 embedding_model_id（假设用户使用统一的模型）
+      const defaultModelId = userKbs[0]?.embedding_model_id || 'local';
+
+      // 生成查询向量
+      const queryEmbedding = await this.generateQueryEmbedding(query, defaultModelId);
+
+      if (!queryEmbedding) {
+        ctx.success([]);
+        return;
+      }
+
+      // 计算相似度并排序
+      const results = points
+        .map(point => {
+          let pointEmbedding = point.embedding;
+          if (Buffer.isBuffer(pointEmbedding)) {
+            pointEmbedding = JSON.parse(pointEmbedding.toString());
+          }
+          const similarity = this.cosineSimilarity(queryEmbedding, pointEmbedding);
+          const knowledge = knowledgeMap.get(point.knowledge_id);
+          const kb = knowledge ? kbMap.get(knowledge.kb_id) : null;
+
+          return {
+            point: {
+              id: point.id,
+              title: point.title,
+              content: point.content,
+              context: point.context,
+              token_count: point.token_count,
+            },
+            knowledge: {
+              id: point.knowledge_id,
+              title: knowledge?.title || null,
+            },
+            knowledge_base: {
+              id: kb?.id || null,
+              name: kb?.name || null,
+            },
+            score: similarity,
+          };
+        })
+        .filter(r => r.score >= threshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, parseInt(top_k));
+
+      ctx.success(results);
+    } catch (error) {
+      logger.error('Global search knowledge error:', error.message || error);
+      logger.error('Global search knowledge error stack:', error.stack);
+      ctx.error('全局搜索失败: ' + (error.message || '未知错误'), 500);
     }
   }
 

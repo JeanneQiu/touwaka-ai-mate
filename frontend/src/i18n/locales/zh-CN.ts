@@ -642,6 +642,11 @@ export default {
     newArticle: '新建文章',
     search: '搜索',
     searchHint: '输入关键词进行语义搜索...',
+    globalSearch: '全局搜索',
+    searchResult: {
+      title: '搜索结果',
+      empty: '未找到相关知识点',
+    },
 
     // 文章树
     articleTree: '文章目录',
@@ -703,6 +708,8 @@ export default {
       updateFailed: '更新知识点失败',
       deleteConfirm: '确定要删除这个知识点吗？',
       tokenCount: '{count} tokens',
+      vectorized: '已向量化',
+      notVectorized: '未向量化',
     },
 
     // 搜索结果
