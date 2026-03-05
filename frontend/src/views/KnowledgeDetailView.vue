@@ -305,7 +305,8 @@ const pointForm = ref({
 })
 
 // Computed
-const kbId = computed(() => Number(route.params.kbId))
+// 支持字符串(UUID)和数字类型的 kbId
+const kbId = computed(() => route.params.kbId)
 
 const flatKnowledgeList = computed(() => {
   const flatten = (nodes: Knowledge[]): Knowledge[] => {

@@ -32,7 +32,7 @@
     </div>
 
     <!-- Empty State -->
-    <div v-else-if="kbStore.knowledgeBases.length === 0" class="empty-state">
+    <div v-else-if="totalCount === 0" class="empty-state">
       <div class="empty-icon">📚</div>
       <p>{{ $t('knowledgeBase.empty') }}</p>
       <button class="btn-primary" @click="showCreateDialog = true">
@@ -53,14 +53,14 @@
             @click="openKbDetail(kb)"
             @contextmenu.prevent="showContextMenu($event, kb)"
           >
-            <div class="kb-card-icon">{{ getKbIcon(kb) }}</div>
-            <div class="kb-card-name">{{ kb.name }}</div>
+            <div class="kb-card-header">
+              <div class="kb-card-icon">{{ getKbIcon(kb) }}</div>
+              <div class="kb-card-name">{{ kb.name }}</div>
+            </div>
             <div class="kb-card-desc" v-if="kb.description">{{ kb.description }}</div>
             <div class="kb-card-stats">
               <span>{{ $t('knowledgeBase.pointCount', { count: kb.point_count || 0 }) }}</span>
-            </div>
-            <div class="kb-card-time">
-              {{ formatUpdatedTime(kb.updated_at) }}
+              <span class="kb-card-time">{{ formatUpdatedTime(kb.updated_at) }}</span>
             </div>
           </div>
         </div>
@@ -91,6 +91,12 @@
               {{ page }}
             </button>
           </span>
+          <!-- 每页数量选择器 -->
+          <select v-model="pageSize" class="page-size-select" @change="handlePageSizeChange">
+            <option v-for="size in pageSizeOptions" :key="size" :value="size">
+              {{ size }}/页
+            </option>
+          </select>
         </div>
         <button
           class="page-btn"
@@ -254,9 +260,12 @@ const formData = ref({
 
 // Pagination state
 const currentPage = ref(1)
-const pageSize = 12
+const pageSize = ref(12)
 const totalCount = ref(0)
 const totalPages = ref(0)
+
+// 可选的每页数量选项
+const pageSizeOptions = [8, 12, 16, 24, 32]
 
 // 获取 embedding 模型列表
 const embeddingModels = computed(() => {
@@ -334,17 +343,22 @@ const submitForm = async () => {
 
   isSubmitting.value = true
   try {
+    // 转换 embedding_model_id 为字符串
+    const embeddingModelId = formData.value.embedding_model_id
+      ? String(formData.value.embedding_model_id)
+      : undefined
+
     if (editingKb.value) {
       await kbStore.updateKnowledgeBase(editingKb.value.id, {
         name: formData.value.name,
         description: formData.value.description,
-        embedding_model_id: formData.value.embedding_model_id || null,
+        embedding_model_id: embeddingModelId,
       })
     } else {
       await kbStore.createKnowledgeBase({
         name: formData.value.name,
         description: formData.value.description,
-        embedding_model_id: formData.value.embedding_model_id || null,
+        embedding_model_id: embeddingModelId,
       })
       // 创建后刷新当前页
       await loadKbsWithPagination()
@@ -436,19 +450,38 @@ const handleClickOutside = () => {
 // Pagination methods
 const loadKbsWithPagination = async () => {
   try {
+    // 如果当前页大于总页数（删除后可能出现），则跳转到最后一页或第一页
+    if (currentPage.value > totalPages.value && totalPages.value > 0) {
+      currentPage.value = totalPages.value
+    }
+
     const response = await kbStore.loadKnowledgeBases({
       page: currentPage.value,
-      limit: pageSize,
+      pageSize: pageSize.value,
     })
     console.log('[KB] API response:', response)
     if (response && response.pagination) {
       totalCount.value = response.pagination.total
       totalPages.value = response.pagination.pages
+
+      // 如果删除后当前页没有数据，且不是第一页，则跳转到前一页
+      if (kbStore.knowledgeBases.length === 0 && currentPage.value > 1) {
+        currentPage.value = currentPage.value - 1
+        await loadKbsWithPagination()
+        return
+      }
+
       console.log('[KB] Pagination:', { total: totalCount.value, pages: totalPages.value, current: currentPage.value })
     }
   } catch (error) {
     console.error('Failed to load knowledge bases:', error)
   }
+}
+
+// 切换每页数量
+const handlePageSizeChange = async () => {
+  currentPage.value = 1 // 重置到第一页
+  await loadKbsWithPagination()
 }
 
 const changePage = async (page: number) => {
@@ -477,61 +510,76 @@ onUnmounted(() => {
 }
 
 .kb-view {
-  padding: 24px;
-  max-width: 1400px;
+  padding: 16px 24px;
   width: 100%;
-  margin: 0 auto;
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
+  background: #fff;
 }
 
 .view-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
-  gap: 16px;
+  margin-bottom: 8px;
+  gap: 8px;
   flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.06);
 }
 
 .view-title {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   margin: 0;
-  color: var(--text-primary, #333);
+  color: #1e293b;
+  letter-spacing: -0.02em;
 }
 
 /* Filter */
 .kb-filter {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
 }
 
 .search-input {
   width: 100%;
-  max-width: 400px;
+  max-width: 360px;
   padding: 10px 16px;
-  border: 1px solid var(--border-color, #e0e0e0);
+  border: 1px solid rgba(203, 213, 225, 0.8);
   border-radius: 8px;
   font-size: 14px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  outline: none;
 }
 
 .btn-search {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 16px;
-  background: linear-gradient(135deg, var(--primary-color, #2196f3) 0%, #1976d2 100%);
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
   border: none;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
   white-space: nowrap;
 }
 
@@ -649,11 +697,12 @@ onUnmounted(() => {
 /* Knowledge Base Grid */
 .kb-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
   width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
   padding: 8px;
-  align-content: start;
   box-sizing: border-box;
   overflow-y: auto;
   flex: 1;
@@ -661,18 +710,18 @@ onUnmounted(() => {
 
 .kb-card {
   position: relative;
-  padding: 20px;
-  padding-left: 24px;
-  background: linear-gradient(135deg, #fefefe 0%, #f8f9fa 100%);
-  border: none;
-  border-radius: 12px;
+  padding: 16px;
+  padding-left: 20px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 10px;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
-  min-height: 140px;
+  height: 130px;
   box-sizing: border-box;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
   overflow: hidden;
 }
 
@@ -683,41 +732,45 @@ onUnmounted(() => {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 6px;
-  background: linear-gradient(180deg, var(--primary-color, #2196f3) 0%, #1565c0 100%);
-  border-radius: 12px 0 0 12px;
-  transition: width 0.3s ease;
+  width: 4px;
+  background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%);
+  border-radius: 10px 0 0 10px;
+  transition: width 0.25s ease;
 }
 
 .kb-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  transform: translateY(-4px);
-  background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%);
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+  transform: translateY(-3px);
+  border-color: rgba(59, 130, 246, 0.3);
 }
 
 .kb-card:hover::before {
-  width: 8px;
+  width: 5px;
 }
 
 .kb-card-icon {
-  font-size: 36px;
-  margin-bottom: 12px;
+  font-size: 28px;
+  margin-right: 10px;
   filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
 }
 
+.kb-card-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
 .kb-card-name {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary, #1a1a2e);
-  margin-bottom: 6px;
-  word-break: break-word;
+  color: #1e293b;
   line-height: 1.4;
 }
 
 .kb-card-desc {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary, #5a6a7a);
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -727,33 +780,19 @@ onUnmounted(() => {
 }
 
 .kb-card-stats {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary, #6b7c8c);
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: 8px;
   border-top: 1px dashed rgba(0, 0, 0, 0.08);
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.kb-card-stats::before {
-  content: '📝';
-  font-size: 14px;
+  justify-content: space-between;
 }
 
 .kb-card-time {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-tertiary, #9aa5b1);
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.kb-card-time::before {
-  content: '🕐';
-  font-size: 12px;
 }
 
 /* Dialog */
@@ -866,17 +905,17 @@ onUnmounted(() => {
 .btn-primary {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 10px 20px;
-  background: linear-gradient(135deg, var(--primary-color, #2196f3) 0%, #1976d2 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -997,28 +1036,28 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 16px;
-  padding: 16px 0;
-  border-top: 1px solid var(--border-color, #e0e0e0);
-  background: var(--bg-color, #fff);
-  flex-shrink: 0; /* 防止分页被压缩 */
+  gap: 4px;
+  padding: 6px 0;
+  border-top: 1px dashed rgba(203, 213, 225, 0.6);
+  background: rgba(255, 255, 255, 0.5);
+  flex-shrink: 0;
 }
 
 .page-btn {
-  padding: 8px 16px;
-  background: var(--secondary-bg, #f5f5f5);
-  border: 1px solid var(--border-color, #e0e0e0);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--text-secondary, #666);
+  padding: 4px 10px;
+  background: #fff;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 5px;
+  font-size: 12px;
+  color: #64748b;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .page-btn:hover:not(:disabled) {
-  background: var(--primary-light, #e3f2fd);
-  border-color: var(--primary-color, #2196f3);
-  color: var(--primary-color, #2196f3);
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #3b82f6;
 }
 
 .page-btn:disabled {
@@ -1040,26 +1079,47 @@ onUnmounted(() => {
 }
 
 .page-num {
-  min-width: 32px;
-  height: 32px;
-  padding: 4px 8px;
-  background: white;
-  border: 1px solid var(--border-color, #e0e0e0);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--text-secondary, #666);
+  min-width: 26px;
+  height: 26px;
+  padding: 2px 6px;
+  background: #fff;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 5px;
+  font-size: 12px;
+  color: #64748b;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .page-num:hover {
-  border-color: var(--primary-color, #2196f3);
-  color: var(--primary-color, #2196f3);
+  border-color: #3b82f6;
+  color: #3b82f6;
 }
 
 .page-num.active {
-  background: var(--primary-color, #2196f3);
-  border-color: var(--primary-color, #2196f3);
+  background: #3b82f6;
+  border-color: #3b82f6;
   color: white;
+}
+
+/* 每页数量选择器 */
+.page-size-select {
+  margin-left: 12px;
+  padding: 3px 6px;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 5px;
+  font-size: 12px;
+  color: #64748b;
+  background: #fff;
+  cursor: pointer;
+  outline: none;
+}
+
+.page-size-select:hover {
+  border-color: #3b82f6;
+}
+
+.page-size-select:focus {
+  border-color: #3b82f6;
 }
 </style>
