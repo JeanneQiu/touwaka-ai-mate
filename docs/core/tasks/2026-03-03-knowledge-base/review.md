@@ -280,7 +280,56 @@ res.on('end', () => {
 
 ---
 
-## 十、安全与性能
+## 十一、2026-03-06 文章状态递归更新
+
+### 11.1 问题背景
+
+1. **状态显示问题**: 创建知识点并向量化完成后，目录树仍显示"待处理"
+2. **根节点状态**: 用户希望根节点下所有子节点都向量化完成后，不再显示 pending 提示
+3. **前端类型错误**: `selectedId` prop 类型错误，期望 `Number` 但实际传入 `String`
+
+### 11.2 修复内容
+
+#### 后端修复
+
+| 文件 | 变更内容 |
+|------|----------|
+| `server/controllers/knowledge-base.controller.js` | 添加 `updateKnowledgeStatusRecursively` 方法，递归更新文章及其父节点状态 |
+
+**核心逻辑**:
+- 叶子节点：根据知识点向量化情况设置状态（ready/pending）
+- 非叶子节点：根据所有子节点状态综合计算（all ready → ready, 有 failed → failed）
+
+#### 前端修复
+
+| 文件 | 变更内容 |
+|------|----------|
+| `frontend/src/components/KnowledgeTreeNode.vue` | 修复 `selectedId` 类型 `number` → `string` |
+| `frontend/src/components/KnowledgeTreeNode.vue` | 状态徽章显示中文（待处理/处理中/失败）|
+
+### 11.3 代码审查意见
+
+#### ✅ 优点
+1. **递归更新**: 自动更新父节点状态，减少手动操作
+2. **状态简化**: 只显示两种状态（ready 无提示 / 非 ready 显示提示）
+3. **类型修复**: 修复 Vue prop 类型警告
+
+#### ⚠️ 建议
+1. **性能优化**: 大量文章时递归可能较慢，可考虑使用数据库触发器
+2. **边界处理**: 知识点删除时也触发状态更新（已实现）
+
+---
+
+## 十二、迁移脚本
+
+| 文件 | 功能 |
+|------|------|
+| `scripts/migrate-update-knowledge-status.js` | 批量更新文章状态（递归检查子节点）|
+| `scripts/debug-kb-status.js` | 调试脚本（检查状态与实际向量化是否一致）|
+
+---
+
+## 十三、安全与性能
 
 | 检查项 | 状态 |
 |--------|------|

@@ -865,7 +865,7 @@ class KnowledgeBaseController {
       try {
         await this.updateKnowledgeStatusRecursively(knowledge_id);
       } catch (statusError) {
-        logger.warn(`[KB] Failed to update knowledge status:`, statusError.message);
+        logger.error(`[KB] Failed to update knowledge status:`, statusError.stack || statusError.message || statusError);
       }
 
       const result = await this.KnowledgePoint.findOne({
@@ -1229,7 +1229,7 @@ class KnowledgeBaseController {
       this.ensureModels();
       const { kb_id } = ctx.params;
       // 注意：默认阈值设为 0.1，因为 all-MiniLM-L6-v2 的相似度通常在 0.1-0.5 之间
-      const { query, top_k = 5, threshold = 0.1 } = ctx.request.body;
+      const { query, top_k = 5, threshold = 0.1, knowledge_id } = ctx.request.body;
 
       if (!query) {
         ctx.error('搜索查询不能为空');
@@ -1246,12 +1246,27 @@ class KnowledgeBaseController {
         return;
       }
 
-      // 获取所有有向量的知识点（先获取知识库下的文章ID列表）
-      const knowledgeIds = await this.Knowledge.findAll({
-        where: { kb_id },
-        attributes: ['id'],
-        raw: true,
-      }).then(rows => rows.map(r => r.id));
+      // 获取要搜索的文章ID列表
+      let knowledgeIds;
+      if (knowledge_id) {
+        // 指定文章搜索（结构路径）
+        const knowledge = await this.Knowledge.findOne({
+          where: { id: knowledge_id, kb_id },
+          raw: true,
+        });
+        if (!knowledge) {
+          ctx.error('指定文章不存在或无权限', 404);
+          return;
+        }
+        knowledgeIds = [knowledge_id];
+      } else {
+        // 全知识库搜索（语义路径）
+        knowledgeIds = await this.Knowledge.findAll({
+          where: { kb_id },
+          attributes: ['id'],
+          raw: true,
+        }).then(rows => rows.map(r => r.id));
+      }
 
       if (knowledgeIds.length === 0) {
         ctx.success([]);
@@ -1459,30 +1474,28 @@ class KnowledgeBaseController {
    * @param {boolean} isChildUpdate - 是否是从子节点触发的更新
    */
   async updateKnowledgeStatusRecursively(knowledgeId, isChildUpdate = false) {
-    logger.info(`[KB] updateKnowledgeStatusRecursively called for ${knowledgeId}, isChildUpdate=${isChildUpdate}`);
-
-    // 获取当前文章的子节点和知识点统计
-    const [childCount] = await this.Knowledge.findAndCountAll({
+    // 获取当前文章的子节点数量
+    const childResult = await this.Knowledge.findAndCountAll({
       where: { parent_id: knowledgeId },
       attributes: ['id'],
     });
+    const childCountNum = childResult.count || 0;
 
-    const [pointStats] = await this.KnowledgePoint.findAll({
+    // 获取知识点统计（使用原始查询避免 Sequelize 问题）
+    const pointStats = await this.KnowledgePoint.findAll({
       where: { knowledge_id: knowledgeId },
-      attributes: [
-        [this.Sequelize.fn('COUNT', this.Sequelize.col('id')), 'total'],
-        [this.Sequelize.fn('SUM',
-          this.Sequelize.literal('CASE WHEN embedding IS NOT NULL THEN 1 ELSE 0 END')
-        ), 'vectorized'],
-      ],
+      attributes: ['id', 'embedding'],
       raw: true,
     });
 
-    const totalPoints = parseInt(pointStats.total) || 0;
-    const vectorizedPoints = parseInt(pointStats.vectorized) || 0;
-    const childCountNum = childCount.count || 0;
-
-    logger.info(`[KB] Knowledge ${knowledgeId}: childCount=${childCountNum}, totalPoints=${totalPoints}, vectorizedPoints=${vectorizedPoints}`);
+    let totalPoints = 0;
+    let vectorizedPoints = 0;
+    for (const p of pointStats) {
+      totalPoints++;
+      if (p.embedding && Buffer.isBuffer(p.embedding) && p.embedding.length > 0) {
+        vectorizedPoints++;
+      }
+    }
 
     let newStatus;
     if (childCountNum === 0 && totalPoints === 0) {
@@ -1503,8 +1516,6 @@ class KnowledgeBaseController {
       const hasPending = childStatuses.includes('pending');
       const hasProcessing = childStatuses.includes('processing');
       const allReady = childStatuses.every(s => s === 'ready');
-
-      logger.info(`[KB] Knowledge ${knowledgeId} children statuses: ${JSON.stringify(childStatuses)}`);
 
       // 检查当前节点的知识点
       const hasPartialVectorized = vectorizedPoints > 0 && vectorizedPoints < totalPoints;

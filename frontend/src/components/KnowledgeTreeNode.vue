@@ -25,9 +25,9 @@
       <!-- Title -->
       <span class="node-title">{{ node.title }}</span>
 
-      <!-- Status Badge -->
+      <!-- Status Badge: 只在未完全向量化时显示 -->
       <span v-if="node.status !== 'ready'" class="status-badge" :class="node.status">
-        {{ node.status }}
+        {{ node.status === 'pending' ? '待处理' : node.status === 'processing' ? '处理中' : '失败' }}
       </span>
 
       <!-- Point Count -->
@@ -79,7 +79,7 @@ import type { Knowledge } from '@/types'
 const props = defineProps<{
   node: Knowledge
   level: number
-  selectedId?: number
+  selectedId?: string
   forceExpand?: boolean | null
 }>()
 

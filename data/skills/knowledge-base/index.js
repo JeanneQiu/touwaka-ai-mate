@@ -351,6 +351,30 @@ async function search(params, context) {
 }
 
 /**
+ * 在指定文章中进行语义搜索（结构路径）
+ * 用于已知用户问题属于哪个分类/章节时，精准搜索该分类下的内容
+ */
+async function searchInKnowledge(params, context) {
+  const userId = getUserId(context);
+  const { kb_id, knowledge_id, query, top_k = 5, threshold = 0.1 } = params;
+  if (!kb_id) {
+    throw new Error('知识库 ID 不能为空');
+  }
+  if (!knowledge_id) {
+    throw new Error('文章 ID 不能为空（结构路径搜索需要指定分类/章节）');
+  }
+  if (!query) {
+    throw new Error('搜索查询不能为空');
+  }
+  return await httpRequest('POST', `/api/kb/${kb_id}/search`, {
+    query,
+    top_k,
+    threshold,
+    knowledge_id, // 指定文章ID，实现结构路径搜索
+  }, userId);
+}
+
+/**
  * 全局语义搜索
  */
 async function globalSearch(params, context) {
