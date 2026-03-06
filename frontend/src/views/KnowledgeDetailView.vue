@@ -373,8 +373,10 @@ const handleRevectorize = async () => {
         } else if (progress.status === 'completed') {
           // 完成
           alert(`重新向量化完成！\n总计: ${progress.total}\n成功: ${progress.success}\n失败: ${progress.failed}\n向量维度: ${progress.embedding_dim}`)
-          // 刷新知识点列表
-          await kbStore.loadPoints(kbId.value, selectedKnowledgeId.value)
+          // 刷新知识点列表（如果有选中文章）
+          if (selectedKnowledge.value?.id) {
+            await kbStore.loadKnowledgePoints(kbId.value, selectedKnowledge.value.id)
+          }
           isRevectorizing.value = false
           revectorizeJobId = ''
         }

@@ -14,12 +14,24 @@ const revectorizeProgress = new Map();
 
 import logger from '../../lib/logger.js';
 import Utils from '../../lib/utils.js';
-import { Op } from 'sequelize';
+import { Op, DataTypes } from 'sequelize';
 import {
   buildQueryOptions,
   buildPaginatedResponse,
 } from '../../lib/query-builder.js';
 import { generateEmbedding, isLocalModelAvailable } from '../../lib/local-embedding.js';
+
+/**
+ * 将向量数组转换为 MariaDB VECTOR SQL 格式
+ * @param {number[]} embedding 向量数组
+ * @returns {string} MariaDB VECTOR SQL 格式，如: VEC_FromText('[0.1, 0.2, ...]')
+ */
+function toVectorSQL(embedding) {
+  if (!Array.isArray(embedding)) return null;
+  // 使用 JSON 数组文本格式
+  const jsonStr = JSON.stringify(embedding);
+  return `VEC_FromText('${jsonStr}')`;
+}
 
 // 允许过滤的字段白名单
 const KB_FILTER_FIELDS = [
@@ -818,14 +830,18 @@ class KnowledgeBaseController {
       // 自动生成嵌入向量
       let is_vectorized = false;
       let actualEmbeddingDim = null;
+
       try {
-        const text = content || title;
-        if (text) {
-          const embedding = await this.generateQueryEmbedding(text, kb.embedding_model_id);
+        // 构建上下文增强的文本：文章摘要 + 知识点标题 + 知识点正文
+        const summary = knowledge.summary || '';
+        const contextText = summary ? `[文章摘要] ${summary}\n[知识点] ${title || ''}\n${content}` : (content || title);
+        if (contextText) {
+          const embedding = await this.generateQueryEmbedding(contextText, kb.embedding_model_id);
           if (embedding) {
             actualEmbeddingDim = embedding.length;
+            const vectorSQL = toVectorSQL(embedding);
             await this.KnowledgePoint.update(
-              { embedding: JSON.stringify(embedding) },
+              { embedding: this.db.sequelize.literal(vectorSQL) },
               { where: { id: point.id } }
             );
             is_vectorized = true;
@@ -843,6 +859,13 @@ class KnowledgeBaseController {
         }
       } catch (embedError) {
         logger.warn(`[KB] Failed to auto-generate embedding for point ${point.id}:`, embedError.message);
+      }
+
+      // 递归更新文章及其所有祖先节点的状态
+      try {
+        await this.updateKnowledgeStatusRecursively(knowledge_id);
+      } catch (statusError) {
+        logger.warn(`[KB] Failed to update knowledge status:`, statusError.message);
       }
 
       const result = await this.KnowledgePoint.findOne({
@@ -923,9 +946,10 @@ class KnowledgeBaseController {
       if (embedding !== undefined) {
         // embedding 可以是数组或字符串（JSON）
         if (Array.isArray(embedding)) {
-          updates.embedding = Buffer.from(JSON.stringify(embedding));
+          updates.embedding = this.db.sequelize.literal(toVectorSQL(embedding));
         } else if (typeof embedding === 'string') {
-          updates.embedding = Buffer.from(embedding);
+          const parsed = JSON.parse(embedding);
+          updates.embedding = this.db.sequelize.literal(toVectorSQL(parsed));
         }
       }
 
@@ -948,6 +972,9 @@ class KnowledgeBaseController {
         attributes: { exclude: ['embedding'] },
         raw: true,
       });
+
+      // 递归更新文章及其所有祖先节点的状态
+      await this.updateKnowledgeStatusRecursively(knowledge_id);
 
       ctx.success(point, '更新成功');
     } catch (error) {
@@ -1023,6 +1050,9 @@ class KnowledgeBaseController {
         return;
       }
 
+      // 递归更新文章及其所有祖先节点的状态
+      await this.updateKnowledgeStatusRecursively(knowledge_id);
+
       ctx.status = 204;
     } catch (error) {
       logger.error('Delete knowledge point error:', error);
@@ -1051,10 +1081,10 @@ class KnowledgeBaseController {
         return;
       }
 
-      // 获取知识库下的所有知识点
+      // 获取知识库下的所有知识点（含摘要）
       const knowledges = await this.Knowledge.findAll({
         where: { kb_id },
-        attributes: ['id'],
+        attributes: ['id', 'summary'],
         raw: true,
       });
 
@@ -1064,10 +1094,14 @@ class KnowledgeBaseController {
       }
 
       const knowledgeIds = knowledges.map(k => k.id);
+      const knowledgeSummaryMap = {};
+      knowledges.forEach(k => {
+        knowledgeSummaryMap[k.id] = k.summary || '';
+      });
 
       const points = await this.KnowledgePoint.findAll({
         where: { knowledge_id: knowledgeIds },
-        attributes: ['id', 'title', 'content'],
+        attributes: ['id', 'knowledge_id', 'title', 'content'],
         raw: true,
       });
 
@@ -1096,17 +1130,22 @@ class KnowledgeBaseController {
       for (let i = 0; i < points.length; i++) {
         const point = points[i];
         try {
-          const text = point.content || point.title;
-          if (!text) {
+          const pointText = point.content || point.title;
+          if (!pointText) {
             failCount++;
             continue;
           }
 
-          const embedding = await this.generateQueryEmbedding(text, kb.embedding_model_id);
+          // 构建上下文增强的文本：文章摘要 + 知识点标题 + 知识点正文
+          const summary = knowledgeSummaryMap[point.knowledge_id] || '';
+          const contextText = summary ? `[文章摘要] ${summary}\n[知识点] ${point.title || ''}\n${point.content}` : pointText;
+
+          const embedding = await this.generateQueryEmbedding(contextText, kb.embedding_model_id);
           if (embedding) {
             const actualDim = embedding.length;
+            const vectorSQL = toVectorSQL(embedding);
             await this.KnowledgePoint.update(
-              { embedding: JSON.stringify(embedding) },
+              { embedding: this.db.sequelize.literal(vectorSQL) },
               { where: { id: point.id } }
             );
             successCount++;
@@ -1411,6 +1450,87 @@ class KnowledgeBaseController {
       return isLocalModelAvailable();
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * 递归更新文章及其所有祖先节点的状态
+   * @param {string} knowledgeId - 文章ID
+   * @param {boolean} isChildUpdate - 是否是从子节点触发的更新
+   */
+  async updateKnowledgeStatusRecursively(knowledgeId, isChildUpdate = false) {
+    logger.info(`[KB] updateKnowledgeStatusRecursively called for ${knowledgeId}, isChildUpdate=${isChildUpdate}`);
+
+    // 获取当前文章的子节点和知识点统计
+    const [childCount] = await this.Knowledge.findAndCountAll({
+      where: { parent_id: knowledgeId },
+      attributes: ['id'],
+    });
+
+    const [pointStats] = await this.KnowledgePoint.findAll({
+      where: { knowledge_id: knowledgeId },
+      attributes: [
+        [this.Sequelize.fn('COUNT', this.Sequelize.col('id')), 'total'],
+        [this.Sequelize.fn('SUM',
+          this.Sequelize.literal('CASE WHEN embedding IS NOT NULL THEN 1 ELSE 0 END')
+        ), 'vectorized'],
+      ],
+      raw: true,
+    });
+
+    const totalPoints = parseInt(pointStats.total) || 0;
+    const vectorizedPoints = parseInt(pointStats.vectorized) || 0;
+    const childCountNum = childCount.count || 0;
+
+    logger.info(`[KB] Knowledge ${knowledgeId}: childCount=${childCountNum}, totalPoints=${totalPoints}, vectorizedPoints=${vectorizedPoints}`);
+
+    let newStatus;
+    if (childCountNum === 0 && totalPoints === 0) {
+      newStatus = 'pending';
+    } else if (childCountNum === 0) {
+      // 叶子节点，检查知识点
+      newStatus = (vectorizedPoints === totalPoints && totalPoints > 0) ? 'ready' : 'pending';
+    } else {
+      // 有子节点，需要检查所有子节点状态
+      const children = await this.Knowledge.findAll({
+        where: { parent_id: knowledgeId },
+        attributes: ['id', 'status'],
+        raw: true,
+      });
+
+      const childStatuses = children.map(c => c.status);
+      const hasFailed = childStatuses.includes('failed');
+      const hasPending = childStatuses.includes('pending');
+      const hasProcessing = childStatuses.includes('processing');
+      const allReady = childStatuses.every(s => s === 'ready');
+
+      logger.info(`[KB] Knowledge ${knowledgeId} children statuses: ${JSON.stringify(childStatuses)}`);
+
+      // 检查当前节点的知识点
+      const hasPartialVectorized = vectorizedPoints > 0 && vectorizedPoints < totalPoints;
+
+      if (allReady && (vectorizedPoints === totalPoints || totalPoints === 0)) {
+        newStatus = 'ready';
+      } else if (hasFailed || hasPartialVectorized) {
+        newStatus = 'failed';
+      } else if (hasProcessing) {
+        newStatus = 'processing';
+      } else {
+        newStatus = 'pending';
+      }
+    }
+
+    logger.info(`[KB] Setting knowledge ${knowledgeId} status to ${newStatus}`);
+
+    // 更新当前节点状态
+    await this.Knowledge.update({ status: newStatus }, { where: { id: knowledgeId } });
+    logger.info(`[KB] Updated knowledge ${knowledgeId} status to ${newStatus}`);
+
+    // 递归更新父节点
+    const knowledge = await this.Knowledge.findByPk(knowledgeId, { attributes: ['parent_id'], raw: true });
+    if (knowledge?.parent_id) {
+      logger.info(`[KB] Recursing to parent ${knowledge.parent_id}`);
+      await this.updateKnowledgeStatusRecursively(knowledge.parent_id, true);
     }
   }
 

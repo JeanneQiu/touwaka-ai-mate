@@ -34,9 +34,9 @@ export default class knowledge_point extends Model {
         comment: '上下文信息（用于向量化）'
       },
       embedding: {
-        type: DataTypes.BLOB,
+        type: 'VECTOR(1024)',
         allowNull: true,
-        comment: '向量（JSON 序列化）'
+        comment: '向量（1024维）'
       },
       position: {
         type: DataTypes.INTEGER,
