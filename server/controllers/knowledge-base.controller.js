@@ -235,61 +235,28 @@ class KnowledgeBaseController {
         raw: true,
       });
 
-      // 为每个知识库添加统计数据
-      const kbIds = rows.map(kb => kb.id);
-      let knowledgeCounts = {};
-      let pointCounts = {};
+      // 为每个知识库计算统计数据
+      const items = await Promise.all(rows.map(async (kb) => {
+        const knowledgeCount = await this.Knowledge.count({ where: { kb_id: kb.id } });
+        let pointCount = 0;
 
-      if (kbIds.length > 0) {
-        // 获取文章数量
-        const knowledges = await this.Knowledge.findAll({
-          where: { kb_id: kbIds },
-          attributes: ['kb_id', [this.Sequelize.fn('COUNT', this.Sequelize.col('id')), 'count']],
-          group: ['kb_id'],
-          raw: true,
-        });
-        for (const k of knowledges) {
-          knowledgeCounts[k.kb_id] = parseInt(k.count) || 0;
-        }
-
-        // 获取知识点数量
-        const knowledgeIds = await this.Knowledge.findAll({
-          where: { kb_id: kbIds },
-          attributes: ['id'],
-          raw: true,
-        }).then(rows => rows.map(r => r.id));
-
-        if (knowledgeIds.length > 0) {
-          const points = await this.KnowledgePoint.findAll({
-            where: { knowledge_id: knowledgeIds },
-            attributes: ['knowledge_id', [this.Sequelize.fn('COUNT', this.Sequelize.col('id')), 'count']],
-            group: ['knowledge_id'],
+        if (knowledgeCount > 0) {
+          const knowledges = await this.Knowledge.findAll({
+            where: { kb_id: kb.id },
+            attributes: ['id'],
             raw: true,
           });
-
-          // 按知识库汇总知识点数量
-          const knowledgeToKb = {};
-          for (const kb of rows) {
-            const kList = knowledges.filter(k => k.kb_id === kb.id);
-            for (const k of kList) {
-              knowledgeToKb[k.id] = kb.id;
-            }
-          }
-
-          for (const p of points) {
-            const kbId = knowledgeToKb[p.knowledge_id];
-            if (kbId) {
-              pointCounts[kbId] = (pointCounts[kbId] || 0) + parseInt(p.count);
-            }
+          const knowledgeIds = knowledges.map(k => k.id);
+          if (knowledgeIds.length > 0) {
+            pointCount = await this.KnowledgePoint.count({ where: { knowledge_id: knowledgeIds } });
           }
         }
-      }
 
-      // 添加统计数据到每个知识库
-      const items = rows.map(kb => ({
-        ...kb,
-        knowledge_count: knowledgeCounts[kb.id] || 0,
-        point_count: pointCounts[kb.id] || 0,
+        return {
+          ...kb,
+          knowledge_count: knowledgeCount,
+          point_count: pointCount,
+        };
       }));
 
       ctx.success({
