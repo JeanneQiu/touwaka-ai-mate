@@ -275,11 +275,13 @@ export default {
     modelType: '模型类型',
     selectModelType: '选择模型类型',
     modelTypeChat: '对话模型',
-    modelTypeEmbedding: '向量模型',
+    modelTypeEmbedding: '嵌入模型',
     modelTypeImage: '多模态模型',
     modelTypeAudio: '语音模型',
     maxTokens: '最大 Token',
     maxTokensPlaceholder: '例如：4096',
+    embeddingDim: '向量维度',
+    embeddingDimPlaceholder: '例如：1024，可为空',
     costPer1kInput: '每千输入 Token 成本',
     costPer1kOutput: '每千输出 Token 成本',
     costPlaceholder: '例如：0.01',
@@ -627,8 +629,8 @@ export default {
     embeddingModelLabel: 'Embedding 模型',
     embeddingModelHint: '选择用于生成向量嵌入的模型，如不选择则使用内置模型',
     useBuiltinModel: '使用内置模型',
-    embeddingModel: '向量模型',
-    selectEmbeddingModel: '选择向量模型',
+    embeddingModel: '嵌入模型',
+    selectEmbeddingModel: '选择嵌入模型',
     createSuccess: '知识库创建成功',
     createFailed: '创建知识库失败',
     updateSuccess: '知识库更新成功',
@@ -665,6 +667,10 @@ export default {
     embedSuccess: '成功生成 {count} 个向量',
     embedFailed: '向量生成失败',
     embedError: '向量生成出错',
+
+    // 重新向量化
+    revectorize: '重新向量化',
+    revectorizing: '向量化中...',
     embedCompleted: '向量生成完成',
 
     // 批量嵌入范围选择

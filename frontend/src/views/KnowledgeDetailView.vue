@@ -18,6 +18,20 @@
           <span>📝</span>
           {{ $t('knowledgeBase.newArticle') }}
         </button>
+        <button class="btn-action btn-revectorize" @click="handleRevectorize" :disabled="isRevectorizing">
+          <span>🔄</span>
+          {{ isRevectorizing ? $t('knowledgeBase.revectorizing') : $t('knowledgeBase.revectorize') }}
+        </button>
+        <!-- 进度显示 -->
+        <div v-if="isRevectorizing && revectorizeProgress.total > 0" class="revectorize-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: (revectorizeProgress.current / revectorizeProgress.total * 100) + '%' }"></div>
+          </div>
+          <div class="progress-text">
+            {{ revectorizeProgress.current }} / {{ revectorizeProgress.total }}
+            (成功: {{ revectorizeProgress.success }}, 失败: {{ revectorizeProgress.failed }})
+          </div>
+        </div>
       </div>
     </div>
 
@@ -265,6 +279,7 @@ import { useKnowledgeBaseStore } from '@/stores/knowledgeBase'
 import KnowledgeTreeNode from '@/components/KnowledgeTreeNode.vue'
 import type { Knowledge, KnowledgePoint } from '@/types'
 import { marked } from 'marked'
+import { knowledgeBaseApi } from '@/api/services'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -286,6 +301,9 @@ const showArticleDialog = ref(false)
 const showPointDialog = ref(false)
 const editingKnowledge = ref<Knowledge | null>(null)
 const editingPoint = ref<KnowledgePoint | null>(null)
+const isRevectorizing = ref(false)
+const revectorizeProgress = ref({ total: 0, success: 0, failed: 0, current: 0, status: '' })
+let revectorizeJobId = ''
 
 // Search
 const searchQuery = ref('')
@@ -326,6 +344,54 @@ const totalTokens = computed(() => {
 })
 
 // Methods
+const handleRevectorize = async () => {
+  if (!kbId.value) return
+
+  if (!confirm('确定要重新向量化所有知识点吗？这将使用当前配置的嵌入模型重新生成所有向量。')) {
+    return
+  }
+
+  isRevectorizing.value = true
+  revectorizeProgress.value = { total: 0, success: 0, failed: 0, current: 0, status: 'starting' }
+
+  try {
+    // 启动重新向量化任务
+    const result = await knowledgeBaseApi.revectorize(kbId.value)
+    revectorizeJobId = result.job_id
+
+    // 轮询获取进度
+    const pollProgress = async () => {
+      if (!revectorizeJobId) return
+
+      try {
+        const progress = await knowledgeBaseApi.getRevectorizeProgress(kbId.value, revectorizeJobId)
+        revectorizeProgress.value = progress
+
+        if (progress.status === 'running') {
+          // 继续轮询
+          setTimeout(pollProgress, 1000)
+        } else if (progress.status === 'completed') {
+          // 完成
+          alert(`重新向量化完成！\n总计: ${progress.total}\n成功: ${progress.success}\n失败: ${progress.failed}\n向量维度: ${progress.embedding_dim}`)
+          // 刷新知识点列表
+          await kbStore.loadPoints(kbId.value, selectedKnowledgeId.value)
+          isRevectorizing.value = false
+          revectorizeJobId = ''
+        }
+      } catch (e) {
+        console.error('获取进度失败:', e)
+      }
+    }
+
+    // 开始轮询
+    pollProgress()
+  } catch (error: any) {
+    alert('重新向量化失败: ' + (error.message || '未知错误'))
+    isRevectorizing.value = false
+    revectorizeJobId = ''
+  }
+}
+
 const goBack = () => {
   router.push({ name: 'knowledge' })
 }
@@ -554,6 +620,51 @@ onMounted(async () => {
 .btn-action:hover {
   background: var(--primary-light, #e3f2fd);
   color: var(--primary-color, #2196f3);
+}
+
+.btn-revectorize {
+  background: var(--accent-bg, #fff3e0);
+  color: var(--accent-color, #ff9800);
+}
+
+.btn-revectorize:hover {
+  background: var(--accent-light, #ffe0b2);
+  color: var(--accent-dark, #f57c00);
+}
+
+.btn-revectorize:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 重新向量化进度 */
+.revectorize-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  padding: 8px;
+  background: var(--secondary-bg, #f5f5f5);
+  border-radius: 6px;
+}
+
+.progress-bar {
+  height: 8px;
+  background: var(--border-color, #e0e0e0);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent-color, #ff9800);
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  text-align: center;
 }
 
 /* Main Content */

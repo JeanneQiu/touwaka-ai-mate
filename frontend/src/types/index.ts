@@ -91,6 +91,7 @@ export interface AIModel {
   model_type?: 'chat' | 'embedding' | 'image' | 'audio'
   description?: string
   max_tokens: number
+  embedding_dim?: number
   cost_per_1k_input: number
   cost_per_1k_output: number
   is_active: boolean
@@ -106,6 +107,7 @@ export interface ModelFormData {
   provider_id: string
   model_type?: 'chat' | 'embedding' | 'image' | 'audio'
   max_tokens?: number
+  embedding_dim?: number
   cost_per_1k_input?: number
   cost_per_1k_output?: number
   description?: string

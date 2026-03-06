@@ -663,13 +663,24 @@
               <option value="audio">{{ $t('settings.modelTypeAudio') }}</option>
             </select>
           </div>
-          <div class="form-item">
+          <!-- 对话/多模态/语音模型显示最大 Token -->
+          <div v-if="modelForm.model_type === 'chat' || modelForm.model_type === 'image' || modelForm.model_type === 'audio'" class="form-item">
             <label class="form-label">{{ $t('settings.maxTokens') }}</label>
             <input
               v-model.number="modelForm.max_tokens"
               type="number"
               class="form-input"
               :placeholder="$t('settings.maxTokensPlaceholder')"
+            />
+          </div>
+          <!-- 嵌入模型显示向量维度 -->
+          <div v-if="modelForm.model_type === 'embedding'" class="form-item">
+            <label class="form-label">{{ $t('settings.embeddingDim') }}</label>
+            <input
+              v-model.number="modelForm.embedding_dim"
+              type="number"
+              class="form-input"
+              :placeholder="$t('settings.embeddingDimPlaceholder')"
             />
           </div>
           <div class="form-item">
@@ -1521,6 +1532,7 @@ const modelForm = reactive<ModelFormData>({
   provider_id: '',
   model_type: 'chat',
   max_tokens: undefined,
+  embedding_dim: undefined,
   cost_per_1k_input: undefined,
   cost_per_1k_output: undefined,
   description: '',
@@ -2128,6 +2140,7 @@ const openModelDialog = (model?: AIModel) => {
     modelForm.provider_id = model.provider_id || ''
     modelForm.model_type = (model as any).model_type || 'chat'
     modelForm.max_tokens = model.max_tokens
+    modelForm.embedding_dim = (model as any).embedding_dim
     modelForm.cost_per_1k_input = model.cost_per_1k_input
     modelForm.cost_per_1k_output = model.cost_per_1k_output
     modelForm.description = model.description || ''
@@ -2140,6 +2153,7 @@ const openModelDialog = (model?: AIModel) => {
     modelForm.provider_id = selectedProvider.value?.id || ''
     modelForm.model_type = 'chat'
     modelForm.max_tokens = undefined
+    modelForm.embedding_dim = undefined
     modelForm.cost_per_1k_input = undefined
     modelForm.cost_per_1k_output = undefined
     modelForm.description = ''

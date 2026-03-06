@@ -9,6 +9,9 @@
  *     └── KnowledgePoint（知识点）
  */
 
+// 重新向量化进度存储
+const revectorizeProgress = new Map();
+
 import logger from '../../lib/logger.js';
 import Utils from '../../lib/utils.js';
 import { Op } from 'sequelize';
@@ -48,6 +51,8 @@ class KnowledgeBaseController {
     this.KnowledgeBase = null;
     this.Knowledge = null;
     this.KnowledgePoint = null;
+    this.AiModel = null;
+    this.Provider = null;
   }
 
   /**
@@ -58,7 +63,70 @@ class KnowledgeBaseController {
       this.KnowledgeBase = this.db.getModel('knowledge_base');
       this.Knowledge = this.db.getModel('knowledge');
       this.KnowledgePoint = this.db.getModel('knowledge_point');
+      this.AiModel = this.db.getModel('ai_model');
+      this.Provider = this.db.getModel('provider');
     }
+  }
+
+  /**
+   * 获取嵌入模型的 API 配置（从提供商获取）
+   */
+  async getEmbeddingApiConfig(modelId) {
+    // 如果是本地模型，返回 null
+    if (modelId === 'local' || !modelId) {
+      return null;
+    }
+
+    // 查询模型及其关联的提供商
+    const model = await this.AiModel.findOne({
+      where: { id: modelId },
+      include: [{
+        model: this.Provider,
+        as: 'provider',
+        attributes: ['id', 'name', 'base_url', 'api_key'],
+      }],
+      raw: true,
+      nest: true,
+    });
+
+    if (model?.provider) {
+      return {
+        baseUrl: model.provider.base_url,
+        apiKey: model.provider.api_key,
+        modelName: model.model_name,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * 获取模型的 embedding 维度
+   * 优先从 ai_models 表获取，其次使用默认值
+   */
+  async getEmbeddingDim(modelId) {
+    // 如果是本地模型（local），使用默认维度
+    if (modelId === 'local' || !modelId) {
+      return 384;
+    }
+
+    // 从 ai_models 表查询
+    if (this.AiModel) {
+      const model = await this.AiModel.findOne({
+        where: { id: modelId },
+        attributes: ['embedding_dim', 'model_type'],
+        raw: true,
+      });
+      if (model && model.embedding_dim) {
+        return model.embedding_dim;
+      }
+      // 如果是 embedding 类型但没有 embedding_dim，返回 null 让调用方处理
+      if (model?.model_type === 'embedding') {
+        return null;
+      }
+    }
+
+    return 384; // 默认维度
   }
 
   // ==================== 知识库 CRUD ====================
@@ -749,17 +817,28 @@ class KnowledgeBaseController {
 
       // 自动生成嵌入向量
       let is_vectorized = false;
+      let actualEmbeddingDim = null;
       try {
         const text = content || title;
         if (text) {
           const embedding = await this.generateQueryEmbedding(text, kb.embedding_model_id);
           if (embedding) {
+            actualEmbeddingDim = embedding.length;
             await this.KnowledgePoint.update(
               { embedding: JSON.stringify(embedding) },
               { where: { id: point.id } }
             );
             is_vectorized = true;
-            logger.info(`[KB] Auto-generated embedding for point ${point.id}`);
+            logger.info(`[KB] Auto-generated embedding for point ${point.id}, dimension: ${actualEmbeddingDim}`);
+
+            // 自动更新知识库的 embedding_dim（如果与实际维度不一致）
+            if (actualEmbeddingDim && (!kb.embedding_dim || kb.embedding_dim !== actualEmbeddingDim)) {
+              await this.KnowledgeBase.update(
+                { embedding_dim: actualEmbeddingDim },
+                { where: { id: kb_id } }
+              );
+              logger.info(`[KB] Updated knowledge base ${kb_id} embedding_dim to ${actualEmbeddingDim}`);
+            }
           }
         }
       } catch (embedError) {
@@ -949,6 +1028,155 @@ class KnowledgeBaseController {
       logger.error('Delete knowledge point error:', error);
       ctx.error('删除知识点失败', 500);
     }
+  }
+
+  // ==================== 向量化功能 ====================
+
+  /**
+   * 重新向量化知识库所有知识点
+   * POST /api/kb/:kb_id/revectorize
+   */
+  async revectorize(ctx) {
+    try {
+      this.ensureModels();
+      const { kb_id } = ctx.params;
+
+      // 验证知识库权限
+      const kb = await this.KnowledgeBase.findOne({
+        where: { id: kb_id, owner_id: ctx.state.userId },
+        raw: true,
+      });
+      if (!kb) {
+        ctx.error('知识库不存在或无权限', 404);
+        return;
+      }
+
+      // 获取知识库下的所有知识点
+      const knowledges = await this.Knowledge.findAll({
+        where: { kb_id },
+        attributes: ['id'],
+        raw: true,
+      });
+
+      if (knowledges.length === 0) {
+        ctx.success({ message: '知识库没有文章' });
+        return;
+      }
+
+      const knowledgeIds = knowledges.map(k => k.id);
+
+      const points = await this.KnowledgePoint.findAll({
+        where: { knowledge_id: knowledgeIds },
+        attributes: ['id', 'title', 'content'],
+        raw: true,
+      });
+
+      if (points.length === 0) {
+        ctx.success({ message: '知识库没有知识点', total: 0, success: 0 });
+        return;
+      }
+
+      // 初始化进度
+      const progressKey = `${kb_id}_${Date.now()}`;
+      revectorizeProgress.set(progressKey, {
+        total: points.length,
+        success: 0,
+        failed: 0,
+        current: 0,
+        status: 'running',
+        embedding_dim: kb.embedding_dim,
+      });
+
+      logger.info(`[KB] Revectorize started: ${progressKey}, total: ${points.length}`);
+
+      // 重新生成所有知识点向量
+      let successCount = 0;
+      let failCount = 0;
+
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        try {
+          const text = point.content || point.title;
+          if (!text) {
+            failCount++;
+            continue;
+          }
+
+          const embedding = await this.generateQueryEmbedding(text, kb.embedding_model_id);
+          if (embedding) {
+            const actualDim = embedding.length;
+            await this.KnowledgePoint.update(
+              { embedding: JSON.stringify(embedding) },
+              { where: { id: point.id } }
+            );
+            successCount++;
+
+            // 更新知识库维度（如果不一致）
+            if (kb.embedding_dim !== actualDim) {
+              await this.KnowledgeBase.update(
+                { embedding_dim: actualDim },
+                { where: { id: kb_id } }
+              );
+              kb.embedding_dim = actualDim;
+            }
+          } else {
+            failCount++;
+          }
+        } catch (err) {
+          logger.warn(`[KB] Failed to revectorize point ${point.id}:`, err.message);
+          failCount++;
+        }
+
+        // 更新进度
+        revectorizeProgress.set(progressKey, {
+          total: points.length,
+          success: successCount,
+          failed: failCount,
+          current: i + 1,
+          status: 'running',
+          embedding_dim: kb.embedding_dim,
+        });
+      }
+
+      // 完成进度
+      revectorizeProgress.set(progressKey, {
+        total: points.length,
+        success: successCount,
+        failed: failCount,
+        current: points.length,
+        status: 'completed',
+        embedding_dim: kb.embedding_dim,
+      });
+
+      logger.info(`[KB] Revectorize completed: ${successCount} success, ${failCount} failed`);
+
+      ctx.success({
+        job_id: progressKey,
+        total: points.length,
+        success: successCount,
+        failed: failCount,
+        embedding_dim: kb.embedding_dim,
+      });
+    } catch (error) {
+      logger.error('Revectorize error:', error);
+      ctx.error('重新向量化失败: ' + error.message, 500);
+    }
+  }
+
+  /**
+   * 获取重新向量化进度
+   * GET /api/kb/:kb_id/revectorize/:job_id
+   */
+  async getRevectorizeProgress(ctx) {
+    const { kb_id, job_id } = ctx.params;
+
+    const progress = revectorizeProgress.get(job_id);
+    if (!progress) {
+      ctx.success({ status: 'not_found' });
+      return;
+    }
+
+    ctx.success(progress);
   }
 
   // ==================== 搜索功能 ====================
@@ -1195,48 +1423,64 @@ class KnowledgeBaseController {
       const useLocal = modelId === 'local' || modelId?.startsWith('local:');
 
       if (useLocal) {
-        logger.info('[KB Search] Using local embedding model');
+        logger.info('[KB] Using local embedding model');
         const embeddings = await generateEmbedding(text);
         return embeddings?.[0] || null;
       }
 
-      // 使用外部 API
-      const embeddingApiUrl = process.env.EMBEDDING_API_URL;
-      const embeddingApiKey = process.env.EMBEDDING_API_KEY;
-      const embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
+      // 优先从模型关联的提供商获取 API 配置
+      let apiConfig = await this.getEmbeddingApiConfig(modelId);
 
-      if (!embeddingApiUrl || !embeddingApiKey) {
+      // 如果没有获取到提供商配置，尝试使用 .env 配置
+      if (!apiConfig) {
+        apiConfig = {
+          baseUrl: process.env.EMBEDDING_API_URL,
+          apiKey: process.env.EMBEDDING_API_KEY,
+          modelName: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
+        };
+      }
+
+      logger.info('[KB] Embedding config:', {
+        url: apiConfig.baseUrl ? 'set' : 'missing',
+        key: apiConfig.apiKey ? 'set' : 'missing',
+        model: apiConfig.modelName,
+        modelId: modelId,
+        from: apiConfig.baseUrl === process.env.EMBEDDING_API_URL ? 'env' : 'provider'
+      });
+
+      if (!apiConfig.baseUrl || !apiConfig.apiKey) {
         // 如果没有配置外部 API，尝试使用本地模型
         if (isLocalModelAvailable()) {
-          logger.info('[KB Search] No external API configured, using local model');
+          logger.info('[KB] No external API configured, using local model');
           const embeddings = await generateEmbedding(text);
           return embeddings?.[0] || null;
         }
-        logger.warn('[KB Search] Embedding API not configured and local model not available');
+        logger.warn('[KB] Embedding API not configured and local model not available');
         return null;
       }
 
-      const response = await fetch(embeddingApiUrl, {
+      const response = await fetch(apiConfig.baseUrl + '/embeddings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${embeddingApiKey}`,
+          'Authorization': `Bearer ${apiConfig.apiKey}`,
         },
         body: JSON.stringify({
           input: text,
-          model: modelId || embeddingModel,
+          model: apiConfig.modelName,
         }),
       });
 
       if (!response.ok) {
-        logger.error('[KB Search] Embedding API error:', response.status);
+        const errorText = await response.text();
+        logger.error('[KB] Embedding API error:', response.status, errorText);
         return null;
       }
 
       const data = await response.json();
       return data.data?.[0]?.embedding || null;
     } catch (error) {
-      logger.error('[KB Search] Generate embedding error:', error);
+      logger.error('[KB] Generate embedding error:', error);
       return null;
     }
   }

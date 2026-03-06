@@ -491,6 +491,20 @@ export const knowledgeBaseApi = {
   // 全局语义搜索（跨所有知识库）
   globalSearch: (data: KnowledgeSearchRequest) =>
     apiRequest<KnowledgeSearchResult[]>(apiClient.post('/kb/search', data)),
+
+  // ========== 向量化 ==========
+
+  // 重新向量化知识库所有知识点
+  revectorize: (kbId: string | number) =>
+    apiRequest<{ job_id: string; total: number; success: number; failed: number; embedding_dim: number }>(
+      apiClient.post(`/kb/${kbId}/revectorize`, {}, { timeout: 600000 })
+    ),
+
+  // 获取重新向量化进度
+  getRevectorizeProgress: (kbId: string | number, jobId: string) =>
+    apiRequest<{ total: number; success: number; failed: number; current: number; status: string; embedding_dim: number }>(
+      apiClient.get(`/kb/${kbId}/revectorize/${jobId}`)
+    ),
 }
 
 // ============================================

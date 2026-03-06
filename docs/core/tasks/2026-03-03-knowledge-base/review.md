@@ -18,6 +18,8 @@
 | Phase 7 | 本地嵌入模型 (all-MiniLM-L6-v2) | ✅ 已完成 |
 | Phase 8 | 自动向量化 | ✅ 已完成 |
 | Phase 9 | 向量化状态显示 | ✅ 已完成 |
+| Phase 10 | 嵌入模型提供商配置 | ✅ 已完成 |
+| Phase 11 | 重新向量化功能 | ✅ 已完成 |
 
 ---
 
@@ -36,8 +38,16 @@
 - **外部模型**: 支持配置自定义 embedding 模型
 - **自动降级**: 外部模型不可用时自动使用本地模型
 - **创建时选择**: 创建知识库时可选择 embedding 模型
+- **提供商配置**: 嵌入模型使用模型提供商的 API 配置（支持 OpenAI 兼容 API）
+- **维度自动检测**: 嵌入模型支持配置维度，为空时自动从 API 响应中检测
 
-### 2.3 前端 UI
+### 2.3 重新向量化
+
+- **一键重算**: 切换嵌入模型后可重新计算所有知识点的向量
+- **进度显示**: 前端实时显示向量化进度（总数/成功/失败）
+- **自动维度更新**: 检测到实际维度与配置不符时自动更新
+
+### 2.4 前端 UI
 - 知识库卡片网格布局（响应式多列）
 - 书脊效果卡片设计
 - 右键菜单（编辑/删除）
@@ -106,6 +116,8 @@
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | GET | `/api/kb/:kb_id/points/:id` | 获取知识点（含 embedding）|
+| POST | `/api/kb/:kb_id/revectorize` | 重新向量化知识库所有知识点 |
+| GET | `/api/kb/:kb_id/revectorize/:job_id` | 获取重新向量化进度 |
 
 ---
 
@@ -225,7 +237,50 @@ res.on('end', () => {
 
 ---
 
-## 九、安全与性能
+## 九、2026-03-06 嵌入模型改进
+
+### 9.1 问题背景
+
+1. **向量模型名称问题**: 前端将嵌入模型显示为"向量模型"，术语不准确
+2. **字段配置问题**: 嵌入模型类型显示"最大 token"字段，应该显示"维度"字段
+3. **维度配置问题**: 用户希望维度可为空，使用 API 默认值
+4. **重新向量化需求**: 切换嵌入模型后需要重新计算所有知识点向量
+
+### 9.2 改进内容
+
+#### 前端改进
+
+| 文件 | 变更内容 |
+|------|----------|
+| `frontend/src/i18n/locales/zh-CN.ts` | "向量模型" → "嵌入模型"；添加 embeddingDim, embeddingDimPlaceholder, revectorize, revectorizing |
+| `frontend/src/types/index.ts` | ModelFormData 添加 `embedding_dim?: number` |
+| `frontend/src/views/SettingsView.vue` | 根据模型类型动态显示字段（max_tokens 或 embedding_dim）|
+| `frontend/src/views/KnowledgeDetailView.vue` | 添加"重新向量化"按钮和进度条 |
+| `frontend/src/api/services.ts` | 添加 revectorize 和 getRevectorizeProgress API |
+
+#### 后端改进
+
+| 文件 | 变更内容 |
+|------|----------|
+| `server/controllers/knowledge-base.controller.js` | 添加 getEmbeddingApiConfig, getEmbeddingDim 方法；添加 revectorize 和 getRevectorizeProgress 方法 |
+| `server/routes/knowledge-base.routes.js` | 添加 POST /:kb_id/revectorize 和 GET /:kb_id/revectorize/:job_id 路由 |
+| `server/controllers/model.controller.js` | embedding_dim 字段支持 |
+
+### 9.3 代码审查意见
+
+#### ✅ 优点
+1. **渐进式增强**: 不破坏现有功能，只添加新特性
+2. **用户体验**: 进度显示直观，支持实时反馈
+3. **灵活性**: 维度可为空，降低配置复杂度
+
+#### ⚠️ 建议
+1. **超时处理**: 向量化大知识库可能耗时较长，建议添加后台任务队列
+2. **错误恢复**: 重新向量化中断后，可考虑支持断点续传
+3. **测试覆盖**: 建议添加嵌入模型 API 调用的单元测试
+
+---
+
+## 十、安全与性能
 
 | 检查项 | 状态 |
 |--------|------|
@@ -236,4 +291,4 @@ res.on('end', () => {
 
 ---
 
-*审查更新于 2026-03-05*
+*审查更新于 2026-03-06*

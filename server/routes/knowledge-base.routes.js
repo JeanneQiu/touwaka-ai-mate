@@ -81,6 +81,12 @@ export default (controller) => {
 
   // ==================== 向量化相关路由 ====================
 
+  // 重新向量化知识库所有知识点
+  router.post('/:kb_id/revectorize', authenticate(), controller.revectorize.bind(controller));
+
+  // 获取重新向量化进度
+  router.get('/:kb_id/revectorize/:job_id', authenticate(), controller.getRevectorizeProgress.bind(controller));
+
   // 获取知识点（包含 embedding）
   router.get('/:kb_id/points/:id', authenticate(), controller.getPointWithEmbedding.bind(controller));
 
