@@ -457,6 +457,7 @@ async function execute(toolName, params, context = {}) {
 
     // 搜索操作
     'search': search,
+    'search_in_knowledge': searchInKnowledge,
     'global_search': globalSearch,
   };
 

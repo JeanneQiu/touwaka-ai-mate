@@ -22,6 +22,7 @@ tools:
   - update_point
   - delete_point
   - search
+  - search_in_knowledge
   - global_search
 ---
 
@@ -204,10 +205,21 @@ tools:
 
 #### search
 
-在指定知识库中进行语义搜索。
+在指定知识库中进行语义搜索（路 A：语义路径）。
 
 **参数:**
 - `kb_id` (string, required): 知识库 ID
+- `query` (string, required): 搜索查询
+- `top_k` (number, optional): 返回结果数量，默认 5
+- `threshold` (number, optional): 相似度阈值，默认 0.1
+
+#### search_in_knowledge
+
+在指定文章中进行语义搜索（路 B：结构路径）。用于已知用户问题属于哪个分类/章节时，精准搜索该分类下的内容。
+
+**参数:**
+- `kb_id` (string, required): 知识库 ID
+- `knowledge_id` (string, required): 文章 ID（从 get_knowledge_tree 获取）
 - `query` (string, required): 搜索查询
 - `top_k` (number, optional): 返回结果数量，默认 5
 - `threshold` (number, optional): 相似度阈值，默认 0.1
