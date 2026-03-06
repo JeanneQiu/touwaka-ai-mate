@@ -6,6 +6,7 @@ user-invocable: true
 allowed-tools: []
 tools:
   - list_knowledge_bases
+  - list_embedding_models
   - get_knowledge_base
   - create_knowledge_base
   - update_knowledge_base
@@ -50,6 +51,20 @@ tools:
 - `page` (number, optional): 页码，默认 1
 - `pageSize` (number, optional): 每页数量，默认 20
 
+#### list_embedding_models
+
+获取可用的嵌入模型列表。用于查看系统支持的向量嵌入模型。
+
+**参数:** 无
+
+**返回:**
+- `id`: 模型 ID
+- `name`: 模型显示名称
+- `model_name`: 模型实际名称
+- `embedding_dim`: 向量维度
+- `provider_name`: 提供商名称
+- `description`: 模型描述
+
 #### get_knowledge_base
 
 获取知识库详情。
@@ -64,8 +79,8 @@ tools:
 **参数:**
 - `name` (string, required): 知识库名称
 - `description` (string, optional): 知识库描述
-- `embedding_model_id` (string, optional): 向量模型 ID，默认 'local'
-- `embedding_dim` (number, optional): 向量维度，默认 384
+- `embedding_model_id` (string, optional): 向量模型 ID，默认 'bge-m3'
+- `embedding_dim` (number, optional): 向量维度，默认 1024
 
 #### update_knowledge_base
 

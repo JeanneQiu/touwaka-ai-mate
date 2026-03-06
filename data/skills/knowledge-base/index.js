@@ -107,6 +107,26 @@ async function listKnowledgeBases(params, context) {
 }
 
 /**
+ * 获取可用的嵌入模型列表
+ */
+async function listEmbeddingModels(params, context) {
+  const userId = getUserId(context);
+  const data = await httpRequest('GET', '/api/models', null, userId);
+  // 过滤出嵌入模型
+  const embeddingModels = data
+    ?.filter(m => m.model_type === 'embedding')
+    ?.map(m => ({
+      id: m.id,
+      name: m.name,
+      model_name: m.model_name,
+      embedding_dim: m.embedding_dim,
+      provider_name: m.provider_name,
+      description: m.description,
+    })) || [];
+  return embeddingModels;
+}
+
+/**
  * 获取知识库详情
  */
 async function getKnowledgeBase(params, context) {
@@ -127,11 +147,16 @@ async function createKnowledgeBase(params, context) {
   if (!name) {
     throw new Error('知识库名称不能为空');
   }
+  // 默认使用 bge-m3 嵌入模型
+  const finalEmbeddingModelId = embedding_model_id || 'bge-m3';
+  // bge-m3 生成的向量维度为 1024
+  const finalEmbeddingDim = embedding_dim || 1024;
+
   return await httpRequest('POST', '/api/kb', {
     name,
     description,
-    embedding_model_id,
-    embedding_dim,
+    embedding_model_id: finalEmbeddingModelId,
+    embedding_dim: finalEmbeddingDim,
   }, userId);
 }
 
@@ -431,6 +456,7 @@ async function execute(toolName, params, context = {}) {
     // 知识库操作
     'list_knowledge_bases': listKnowledgeBases,
     'list_kbs': listKnowledgeBases,
+    'list_embedding_models': listEmbeddingModels,
     'get_knowledge_base': getKnowledgeBase,
     'get_kb': getKnowledgeBase,
     'create_knowledge_base': createKnowledgeBase,
