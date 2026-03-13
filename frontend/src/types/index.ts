@@ -1090,6 +1090,7 @@ export interface Assistant {
   can_use_skills: boolean
   execution_mode: AssistantExecutionMode
   is_active: boolean
+  is_builtin?: boolean
 }
 
 /**

@@ -43,10 +43,12 @@ CREATE TABLE IF NOT EXISTS assistants (
   can_use_skills BIT(1) DEFAULT b'0' COMMENT '是否允许助理调用技能',
   execution_mode ENUM('direct', 'llm', 'hybrid') DEFAULT 'llm' COMMENT '执行模式',
   is_active BIT(1) DEFAULT b'1' COMMENT '是否启用',
+  is_builtin BIT(1) DEFAULT b'0' COMMENT '是否为内置助理（不可删除）',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_assistant_active (is_active),
-  INDEX idx_assistant_mode (execution_mode)
+  INDEX idx_assistant_mode (execution_mode),
+  INDEX idx_assistant_builtin (is_builtin)
 ) COMMENT='助理配置表';
 `;
 
@@ -118,6 +120,52 @@ async function migrate() {
     } else {
       await connection.execute(CREATE_ASSISTANT_REQUESTS_TABLE);
       console.log('  ✅ assistant_requests table created');
+    }
+
+    // 3. 添加内置助理数据
+    console.log('Seeding built-in assistants...');
+    const builtInAssistants = [
+      {
+        assistant_type: 'doc_image_analyzer',
+        name: '文档图片分析助理',
+        icon: 'image',
+        description: '上传图片（文档、照片、截图等），自动识别图片中的文字内容并进行结构化分析。支持中文、英文等多种语言识别。',
+        execution_mode: 'hybrid',
+        is_active: true,
+        is_builtin: true,
+        estimated_time: 30,
+        timeout: 120,
+        prompt_template: '你是一个专业的文档图片分析助手。用户上传图片后，你需要：\n1. 识别图片中的所有文字内容\n2. 分析文档结构（标题、段落、表格等）\n3. 提取关键信息\n4. 以结构化的方式输出分析结果',
+      },
+    ];
+
+    for (const assistant of builtInAssistants) {
+      try {
+        await connection.execute(
+          `INSERT INTO assistants (assistant_type, name, icon, description, execution_mode, is_active, is_builtin, estimated_time, timeout, prompt_template)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+          [
+            assistant.assistant_type,
+            assistant.name,
+            assistant.icon,
+            assistant.description,
+            assistant.execution_mode,
+            assistant.is_active ? 1 : 0,
+            assistant.is_builtin ? 1 : 0,
+            assistant.estimated_time,
+            assistant.timeout,
+            assistant.prompt_template,
+          ]
+        );
+        console.log(`  ✅ Seeded built-in assistant: ${assistant.assistant_type}`);
+      } catch (insertError) {
+        if (insertError.code === 'ER_DUP_ENTRY') {
+          console.log(`  ⏭️ Assistant ${assistant.assistant_type} already exists, skipping`);
+        } else {
+          console.error(`  ❌ Failed to seed ${assistant.assistant_type}:`, insertError.message);
+        }
+      }
     }
 
     console.log('\n✅ Migration completed successfully!');
