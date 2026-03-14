@@ -1,9 +1,49 @@
-# 助理设置页面设计
+# 助理系统增强
 
 > **创建时间**: 2026-03-13
 > **关联任务**: #67 助理系统设计, #91 前端面板
 > **状态**: ✅ 已完成
-> **审计报告**: [CODE_REVIEW.md](./CODE_REVIEW.md)
+> **审计报告**: [CODE_REVIEW.md](./review.md)
+
+## 新增功能
+
+### 助理结果自动推送（2026-03-14 新增）
+
+**功能描述**：助理任务完成后，自动将结果推送到 Expert 会话，无需轮询。
+
+**工作流程**：
+
+| 步骤 | 说明 |
+|------|------|
+| 1. Expert 发起委托 | 召唤助理，返回 request_id |
+| 2. 助理执行 | 后台异步执行任务 |
+| 3. 结果推送 | **助理通过 Internal API 自动将结果插入 Expert 会话** |
+| 4. 用户查看 | 直接在对话中看到结果 |
+
+**技术实现**：
+
+- 新增 `notifyExpertResult()` 方法：任务完成后调用 Internal API
+- 新增 `httpPost()` 辅助方法：HTTP 请求封装
+- 调用 `/internal/messages/insert` 接口插入消息
+- 设置 `trigger_expert: true` 触发专家响应
+
+**代码改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `server/services/assistant-manager.js` | 新增通知逻辑 |
+| `lib/tool-manager.js` | 移除 `assistant_status` tool |
+
+**环境变量**：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `INTERNAL_API_BASE` | 内部 API 地址 | `http://localhost:3000` |
+| `INTERNAL_API_KEY` | 内部 API 密钥 | - |
+
+**效果**：Expert 召唤助理后，可以立即继续对话，助理结果会自动出现在对话中。
+
+---
 
 ---
 
