@@ -20,6 +20,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import logger from '../../lib/logger.js';
 import AssistantMessageService from './assistant-message-service.js';
+import { getSystemSettingService } from './system-setting.service.js';
 
 // 内部 API 地址
 const INTERNAL_API_BASE = process.env.INTERNAL_API_BASE || 'http://localhost:3000';
@@ -1090,6 +1091,22 @@ class AssistantManager {
     };
 
     try {
+      // 获取最大工具调用轮数：优先使用专家配置，否则使用系统默认
+      const systemSettingService = getSystemSettingService(this.db);
+      let maxToolRounds = await systemSettingService.getMaxToolRounds();
+      
+      // 如果有专家ID，尝试获取专家的 max_tool_rounds 配置
+      if (context.expertId) {
+        const expert = await this.db.getModel('expert').findByPk(context.expertId, {
+          attributes: ['max_tool_rounds'],
+          raw: true,
+        });
+        if (expert?.max_tool_rounds !== null && expert?.max_tool_rounds !== undefined) {
+          maxToolRounds = expert.max_tool_rounds;
+          logger.info(`[AssistantManager] 使用专家级别的 max_tool_rounds: ${maxToolRounds}`);
+        }
+      }
+      
       // 调用 LLM（支持多轮工具调用）
       return await this.executeLLMWithTools(
         modelConfig,
@@ -1104,7 +1121,7 @@ class AssistantManager {
             modelConfig.max_output_tokens || 98304
           ),
           timeout: (assistant.timeout || 120) * 1000,
-          maxToolRounds: 5, // 最多 5 轮工具调用
+          maxToolRounds,
         }
       );
     } catch (llmError) {

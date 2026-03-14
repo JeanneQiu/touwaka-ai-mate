@@ -27,33 +27,72 @@
         class="message"
         :class="message.role"
       >
-        <div class="message-avatar">
-          <span v-if="message.role === 'user'">👤</span>
-          <div 
-            v-else
-            class="avatar-image"
-            :style="props.expertAvatar ? { backgroundImage: `url(${props.expertAvatar})` } : {}"
-          >
-            <span v-if="!props.expertAvatar">🤖</span>
+        <!-- tool 消息的特殊渲染 -->
+        <template v-if="message.role === 'tool'">
+          <div class="tool-message-card" :class="{ expanded: isToolExpanded(message.id) }">
+            <!-- 收缩状态：一行显示 -->
+            <div class="tool-header" @click="toggleToolExpand(message.id)">
+              <span class="tool-icon">🔧</span>
+              <span class="tool-name">{{ getToolName(message) }}</span>
+              <span class="tool-status" :class="getToolStatus(message) ? 'success' : 'error'">
+                {{ getToolStatus(message) ? '✅' : '❌' }}
+              </span>
+              <span v-if="getToolDuration(message)" class="tool-duration">
+                {{ getToolDuration(message) }}ms
+              </span>
+              <span class="tool-expand-btn" :class="{ expanded: isToolExpanded(message.id) }">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+            </div>
+            <!-- 展开状态：显示上下文、参数和结果 -->
+            <div v-if="isToolExpanded(message.id)" class="tool-details">
+              <div v-if="getToolContext(message)" class="tool-section context-section">
+                <div class="tool-section-title">{{ $t('chat.toolContext') || '上下文' }}</div>
+                <div class="tool-context-text">{{ getToolContext(message) }}</div>
+              </div>
+              <div v-if="getToolArguments(message)" class="tool-section">
+                <div class="tool-section-title">{{ $t('chat.toolArguments') || '参数' }}</div>
+                <pre class="tool-section-content">{{ formatToolArguments(message) }}</pre>
+              </div>
+              <div v-if="message.content" class="tool-section">
+                <div class="tool-section-title">{{ $t('chat.toolResult') || '结果' }}</div>
+                <pre class="tool-section-content">{{ formatToolResult(message) }}</pre>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="message-content">
-          <div class="message-text" v-html="formatMessage(message.content)"></div>
-          <div v-if="message.status === 'streaming'" class="streaming-indicator">
-            <span class="dot"></span>
-            <span class="dot"></span>
-            <span class="dot"></span>
+        </template>
+        <!-- 普通 user/assistant 消息 -->
+        <template v-else>
+          <div class="message-avatar">
+            <span v-if="message.role === 'user'">👤</span>
+            <div
+              v-else
+              class="avatar-image"
+              :style="props.expertAvatar ? { backgroundImage: `url(${props.expertAvatar})` } : {}"
+            >
+              <span v-if="!props.expertAvatar">🤖</span>
+            </div>
           </div>
-          <div v-if="message.status === 'error'" class="error-text">
-            {{ $t('chat.sendError') }}
-            <button class="retry-btn" @click="$emit('retry', message)">
-              {{ $t('chat.retrySend') }}
-            </button>
+          <div class="message-content">
+            <div class="message-text" v-html="formatMessage(message.content)"></div>
+            <div v-if="message.status === 'streaming'" class="streaming-indicator">
+              <span class="dot"></span>
+              <span class="dot"></span>
+              <span class="dot"></span>
+            </div>
+            <div v-if="message.status === 'error'" class="error-text">
+              {{ $t('chat.sendError') }}
+              <button class="retry-btn" @click="$emit('retry', message)">
+                {{ $t('chat.retrySend') }}
+              </button>
+            </div>
+            <div v-if="message.created_at && message.status !== 'streaming'" class="message-time">
+              {{ formatTime(message.created_at) }}
+            </div>
           </div>
-          <div v-if="message.created_at && message.status !== 'streaming'" class="message-time">
-            {{ formatTime(message.created_at) }}
-          </div>
-        </div>
+        </template>
       </div>
       <div v-if="isLoading" class="message assistant">
         <div class="message-avatar">
@@ -137,12 +176,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import type { Message } from '@/types'
 
 export type ChatMessage = Pick<Message, 'id' | 'role' | 'content' | 'status'> & {
   created_at?: string
+  tool_calls?: string | Record<string, unknown>  // 工具调用信息（直接字段，不在 metadata 中）
+  metadata?: {
+    [key: string]: unknown
+  }
 }
 
 const props = defineProps<{
@@ -170,6 +215,21 @@ const messagesContainer = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const isComposing = ref(false) // 中文输入法组合状态
 const showScrollToBottom = ref(false) // 是否显示滚动到底部按钮
+const expandedTools = ref<Set<string>>(new Set()) // 展开的工具消息ID
+
+// 切换工具展开状态
+const toggleToolExpand = (messageId: string) => {
+  if (expandedTools.value.has(messageId)) {
+    expandedTools.value.delete(messageId)
+  } else {
+    expandedTools.value.add(messageId)
+  }
+}
+
+// 检查工具是否展开
+const isToolExpanded = (messageId: string): boolean => {
+  return expandedTools.value.has(messageId)
+}
 
 // 快捷指令列表
 const commands = [
@@ -211,112 +271,52 @@ const applyCommand = (cmd: typeof commands[0]) => {
   inputRef.value?.focus()
 }
 
-// 记录滚动位置，用于加载更多后恢复
+// ==================== 简化的滚动控制逻辑 ====================
+// 核心原则：只有一个状态变量控制是否应该自动滚动
+
+// 用户是否在底部（用于判断是否应该自动滚动到新消息）
+const isUserAtBottom = ref(true)
+
+// 加载更多相关状态
 const scrollHeightBeforeLoad = ref(0)
 const isLoadingTriggered = ref(false)
-
-// 节流滚动控制 - 使用 requestAnimationFrame 避免频繁滚动
-let scrollRafId: number | null = null
-const scrollToBottom = () => {
-  if (scrollRafId !== null) return // 已有待处理的滚动请求
-  
-  scrollRafId = requestAnimationFrame(() => {
-    scrollRafId = null
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-    }
-  })
-}
-
-// MutationObserver 用于检测消息 DOM 变化（处理异步内容加载）
-let mutationObserver: MutationObserver | null = null
-let isInitialLoad = ref(true) // 标记是否是初始加载
-let scrollStabilizeTimer: ReturnType<typeof setTimeout> | null = null
-
-// 强制滚动到底部（禁用 smooth 动画）
-const forceScrollToBottom = () => {
-  if (!messagesContainer.value) return
-  
-  // 临时禁用 smooth 滚动
-  const originalBehavior = messagesContainer.value.style.scrollBehavior
-  messagesContainer.value.style.scrollBehavior = 'auto'
-  
-  // 立即滚动
-  messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-  
-  // 恢复 smooth 滚动
-  requestAnimationFrame(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.style.scrollBehavior = originalBehavior
-    }
-  })
-}
-
-// 设置 MutationObserver 来处理异步内容渲染后的滚动
-const setupMutationObserver = () => {
-  if (!messagesContainer.value) return
-  
-  // 清理旧的 observer
-  if (mutationObserver) {
-    mutationObserver.disconnect()
-  }
-  
-  mutationObserver = new MutationObserver((mutations) => {
-    // 只在初始加载时自动滚动到底部
-    if (isInitialLoad.value) {
-      // 清除之前的定时器
-      if (scrollStabilizeTimer) {
-        clearTimeout(scrollStabilizeTimer)
-      }
-      
-      // 延迟滚动，等待所有 DOM 更新完成
-      scrollStabilizeTimer = setTimeout(() => {
-        if (messagesContainer.value && isInitialLoad.value) {
-          forceScrollToBottom()
-        }
-      }, 100)
-      
-      // 经过一段时间后（内容基本稳定），结束初始加载状态
-      setTimeout(() => {
-        isInitialLoad.value = false
-      }, 1500)
-    }
-  })
-  
-  // 监听子元素变化
-  mutationObserver.observe(messagesContainer.value, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  })
-}
 
 // 格式化缓存 - 避免重复格式化相同内容
 const formattedCache = new Map<string, string>()
 
 // 检测是否在底部（距离底部 100px 以内视为在底部）
-const isAtBottom = () => {
+const checkIsAtBottom = () => {
   if (!messagesContainer.value) return true
   const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value
   return scrollHeight - scrollTop - clientHeight < 100
 }
 
-// 滚动处理：检测是否滚动到顶部 + 更新滚动到底部按钮状态
+// 滚动到底部（支持即时滚动，用于流式输出）
+const scrollToBottom = (instant = false) => {
+  if (!messagesContainer.value) return
+  
+  if (instant) {
+    // 临时禁用 smooth 滚动，避免流式输出时的"追赶"效果
+    const original = messagesContainer.value.style.scrollBehavior
+    messagesContainer.value.style.scrollBehavior = 'auto'
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    messagesContainer.value.style.scrollBehavior = original
+  } else {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
+// 滚动处理：检测是否滚动到顶部 + 更新用户位置状态
 const handleScroll = () => {
   if (!messagesContainer.value) return
   
-  // 用户手动滚动时，取消初始加载状态
-  if (isInitialLoad.value && !isAtBottom()) {
-    isInitialLoad.value = false
-    if (scrollStabilizeTimer) {
-      clearTimeout(scrollStabilizeTimer)
-      scrollStabilizeTimer = null
-    }
-  }
+  // 更新用户是否在底部的状态
+  isUserAtBottom.value = checkIsAtBottom()
   
   // 更新滚动到底部按钮状态
-  showScrollToBottom.value = !isAtBottom()
+  showScrollToBottom.value = !isUserAtBottom.value
   
+  // 检测是否需要加载更多
   if (!props.hasMoreMessages || props.isLoadingMore) return
   
   const { scrollTop } = messagesContainer.value
@@ -324,7 +324,6 @@ const handleScroll = () => {
   // 距离顶部 100px 以内时自动触发加载
   if (scrollTop < 100 && !isLoadingTriggered.value) {
     isLoadingTriggered.value = true
-    // 记录当前滚动高度，用于加载后恢复位置
     scrollHeightBeforeLoad.value = messagesContainer.value.scrollHeight
     emit('loadMore')
   }
@@ -332,6 +331,7 @@ const handleScroll = () => {
 
 // 点击滚动到底部按钮
 const handleScrollToBottom = () => {
+  isUserAtBottom.value = true
   scrollToBottom()
   showScrollToBottom.value = false
 }
@@ -340,54 +340,67 @@ const handleScrollToBottom = () => {
 const handleLoadMore = () => {
   if (!messagesContainer.value) return
   scrollHeightBeforeLoad.value = messagesContainer.value.scrollHeight
+  isLoadingTriggered.value = true
   emit('loadMore')
 }
 
-// 监听消息数量变化（处理初始加载、新消息、加载更多）
+// 监听消息数量变化
 watch(
   () => props.messages.length,
   (newLength, oldLength) => {
     nextTick(() => {
       if (!messagesContainer.value || newLength === 0) return
       
-      // 情况1：加载更多（消息数量增加且之前正在加载）
-      if (props.isLoadingMore === false && isLoadingTriggered.value && newLength > (oldLength || 0)) {
-        // 恢复滚动位置（保持在原来的消息位置）
+      // 情况1：加载更多完成
+      if (isLoadingTriggered.value && props.isLoadingMore === false && newLength > (oldLength || 0)) {
+        // 恢复滚动位置
         const newScrollHeight = messagesContainer.value.scrollHeight
         messagesContainer.value.scrollTop = newScrollHeight - scrollHeightBeforeLoad.value
         isLoadingTriggered.value = false
+        isUserAtBottom.value = checkIsAtBottom()
         return
       }
       
-      // 情况2：初始加载或新消息 -> 设置 MutationObserver 来处理
+      // 情况2：新消息到达
       if (newLength > (oldLength || 0)) {
-        // 标记为初始加载状态，MutationObserver 会处理滚动
+        // 初始加载：强制滚动到底部
         if (oldLength === 0 || oldLength === undefined) {
-          isInitialLoad.value = true
-          setupMutationObserver()
-        } else {
-          // 非初始加载的新消息，直接滚动
           scrollToBottom()
+          isUserAtBottom.value = true
+        } else {
+          // 非初始加载：只有用户在底部时才滚动
+          if (isUserAtBottom.value) {
+            scrollToBottom()
+          }
         }
-        showScrollToBottom.value = false
+        showScrollToBottom.value = !checkIsAtBottom()
       }
     })
   },
-  { immediate: true } // 立即执行以处理初始加载
+  { immediate: true }
 )
 
-// 监听最后一条消息的状态变化（用于流式更新时的滚动）
+// 流式输出节流控制
+let streamingScrollRaf: number | null = null
+
+// 监听最后一条消息的内容变化（流式更新时保持滚动到底部）
 watch(
-  () => props.messages[props.messages.length - 1]?.status,
-  (status) => {
-    if (status === 'streaming') {
-      scrollToBottom()
+  () => props.messages[props.messages.length - 1]?.content,
+  () => {
+    // 流式输出时，如果用户在底部则即时滚动（使用 RAF 节流）
+    if (isUserAtBottom.value) {
+      if (streamingScrollRaf === null) {
+        streamingScrollRaf = requestAnimationFrame(() => {
+          streamingScrollRaf = null
+          scrollToBottom(true)
+        })
+      }
     }
   }
 )
 
 // 发送消息
-const handleSend = async () => {
+const handleSend = () => {
   const content = inputText.value.trim()
 
   if (!content || props.isLoading || props.disabled) return
@@ -416,7 +429,13 @@ const handleStop = () => {
   emit('stop')
 }
 
-// 格式化消息（支持简单的 markdown，带缓存）
+// 配置 marked 选项
+marked.setOptions({
+  breaks: true, // 支持 GitHub 风格的换行
+  gfm: true, // 启用 GitHub Flavored Markdown
+})
+
+// 格式化消息（支持完整的 markdown，带缓存）
 const formatMessage = (content: string) => {
   if (!content) return ''
   
@@ -426,35 +445,48 @@ const formatMessage = (content: string) => {
     return cached
   }
   
-  // 转义 HTML（注意顺序：先转义 &，再转义 < 和 >）
-  let formatted = content
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-  
-  // 代码块
-  formatted = formatted.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
-  
-  // 行内代码
-  formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>')
-  
-  // 粗体
-  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  
-  // 斜体
-  formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-  
-  // 换行
-  formatted = formatted.replace(/\n/g, '<br>')
-  
-  // 缓存结果（限制缓存大小）
-  if (formattedCache.size > 100) {
-    const firstKey = formattedCache.keys().next().value
-    if (firstKey) formattedCache.delete(firstKey)
+  try {
+    // 使用 marked 解析 Markdown
+    const rawHtml = marked.parse(content) as string
+    
+    // 使用 DOMPurify 进行 XSS 防护
+    // 允许安全的 HTML 标签和属性
+    const cleanHtml = DOMPurify.sanitize(rawHtml, {
+      ALLOWED_TAGS: [
+        'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li',
+        'blockquote', 'pre', 'code',
+        'a', 'img',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'hr', 'div', 'span'
+      ],
+      ALLOWED_ATTR: [
+        'href', 'src', 'alt', 'title', 'class',
+        'target', 'rel',
+        'width', 'height'
+      ],
+      // 允许 data: URI 用于图片（如 base64 图片）
+      ALLOW_DATA_ATTR: true,
+    })
+    
+    // 缓存结果（限制缓存大小）
+    if (formattedCache.size > 100) {
+      const firstKey = formattedCache.keys().next().value
+      if (firstKey) formattedCache.delete(firstKey)
+    }
+    formattedCache.set(content, cleanHtml)
+    
+    return cleanHtml
+  } catch (error) {
+    console.error('Markdown parsing error:', error)
+    // 解析失败时返回转义后的原文
+    return content
+      .replace(/&/g, '&')
+      .replace(/</g, '<')
+      .replace(/>/g, '>')
+      .replace(/\n/g, '<br>')
   }
-  formattedCache.set(content, formatted)
-  
-  return formatted
 }
 
 // 格式化时间显示
@@ -497,30 +529,124 @@ const adjustTextareaHeight = () => {
 
 watch(inputText, adjustTextareaHeight)
 
-onMounted(() => {
-  // 设置 MutationObserver 来处理初始加载后的滚动
-  setupMutationObserver()
-})
+// 注意：初始滚动由 watch 的 immediate: true 处理，无需在 onMounted 中重复
 
 onUnmounted(() => {
-  // 清理待处理的 RAF
-  if (scrollRafId !== null) {
-    cancelAnimationFrame(scrollRafId)
-    scrollRafId = null
-  }
-  // 清理 MutationObserver
-  if (mutationObserver) {
-    mutationObserver.disconnect()
-    mutationObserver = null
-  }
-  // 清理定时器
-  if (scrollStabilizeTimer) {
-    clearTimeout(scrollStabilizeTimer)
-    scrollStabilizeTimer = null
-  }
   // 清理格式化缓存
   formattedCache.clear()
+  // 清理流式滚动 RAF
+  if (streamingScrollRaf !== null) {
+    cancelAnimationFrame(streamingScrollRaf)
+    streamingScrollRaf = null
+  }
 })
+
+// ==================== Tool 消息处理方法 ====================
+
+interface ToolCallData {
+  tool_call_id?: string
+  name?: string
+  tool_name?: string
+  content?: string
+  success?: boolean
+  duration?: number
+  timestamp?: string
+  arguments?: Record<string, unknown>
+  result?: unknown
+  context?: string  // 工具调用前的状态文本上下文
+}
+
+/**
+ * 解析 tool 消息的 tool_calls 字段
+ * 注意：tool_calls 是消息的直接字段，不在 metadata 中
+ */
+const parseToolCalls = (message: ChatMessage): ToolCallData | null => {
+  if (!message.tool_calls) return null
+  
+  try {
+    const toolCalls = typeof message.tool_calls === 'string'
+      ? JSON.parse(message.tool_calls)
+      : message.tool_calls
+    return toolCalls as ToolCallData
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 获取工具名称
+ */
+const getToolName = (message: ChatMessage): string => {
+  const toolData = parseToolCalls(message)
+  if (toolData?.name) return toolData.name
+  if (toolData?.tool_name) return toolData.tool_name
+  return 'unknown_tool'
+}
+
+/**
+ * 获取工具执行状态
+ */
+const getToolStatus = (message: ChatMessage): boolean => {
+  const toolData = parseToolCalls(message)
+  return toolData?.success ?? true
+}
+
+/**
+ * 获取工具执行耗时
+ */
+const getToolDuration = (message: ChatMessage): number | null => {
+  const toolData = parseToolCalls(message)
+  return toolData?.duration ?? null
+}
+
+/**
+ * 获取工具参数
+ */
+const getToolArguments = (message: ChatMessage): Record<string, unknown> | null => {
+  const toolData = parseToolCalls(message)
+  return toolData?.arguments ?? null
+}
+
+/**
+ * 获取工具上下文（工具调用前的状态文本）
+ */
+const getToolContext = (message: ChatMessage): string | null => {
+  const toolData = parseToolCalls(message)
+  return toolData?.context ?? null
+}
+
+/**
+ * 格式化工具参数显示
+ */
+const formatToolArguments = (message: ChatMessage): string => {
+  const args = getToolArguments(message)
+  if (!args) return ''
+  try {
+    return JSON.stringify(args, null, 2)
+  } catch {
+    return String(args)
+  }
+}
+
+/**
+ * 格式化工具结果显示
+ */
+const formatToolResult = (message: ChatMessage): string => {
+  if (!message.content) return ''
+  
+  // 尝试解析 JSON 格式化显示
+  try {
+    const parsed = JSON.parse(message.content)
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    // 非JSON，直接显示（截断过长的内容）
+    const maxLength = 500
+    if (message.content.length > maxLength) {
+      return message.content.substring(0, maxLength) + '\n...(已截断)'
+    }
+    return message.content
+  }
+}
 
 defineExpose({
   scrollToBottom
@@ -534,7 +660,7 @@ defineExpose({
   height: 100%;
   background: var(--chat-bg, #fff);
   border: 1px solid var(--border-color, #e0e0e0);
-  border-radius: 12px;
+  border-radius: 0 0 12px 12px;
   overflow: hidden;
   position: relative;
 }
@@ -665,16 +791,102 @@ defineExpose({
   color: var(--text-primary, #333);
 }
 
-.message-text :deep(pre) {
-  background: var(--code-bg, #f0f0f0);
-  padding: 12px;
-  border-radius: 8px;
-  overflow-x: auto;
+/* Markdown 标题样式 */
+.message-text :deep(h1),
+.message-text :deep(h2),
+.message-text :deep(h3),
+.message-text :deep(h4),
+.message-text :deep(h5),
+.message-text :deep(h6) {
+  margin: 16px 0 8px 0;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary, #333);
+}
+
+.message-text :deep(h1) { font-size: 1.5em; border-bottom: 1px solid var(--border-color, #e0e0e0); padding-bottom: 8px; }
+.message-text :deep(h2) { font-size: 1.35em; border-bottom: 1px solid var(--border-color, #e0e0e0); padding-bottom: 6px; }
+.message-text :deep(h3) { font-size: 1.2em; }
+.message-text :deep(h4) { font-size: 1.1em; }
+.message-text :deep(h5) { font-size: 1em; }
+.message-text :deep(h6) { font-size: 0.95em; color: var(--text-secondary, #666); }
+
+/* Markdown 段落样式 */
+.message-text :deep(p) {
   margin: 8px 0;
 }
 
+.message-text :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.message-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+/* Markdown 列表样式 */
+.message-text :deep(ul),
+.message-text :deep(ol) {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.message-text :deep(li) {
+  margin: 4px 0;
+}
+
+.message-text :deep(ul) {
+  list-style-type: disc;
+}
+
+.message-text :deep(ol) {
+  list-style-type: decimal;
+}
+
+.message-text :deep(ul ul) {
+  list-style-type: circle;
+}
+
+.message-text :deep(ul ul ul) {
+  list-style-type: square;
+}
+
+/* Markdown 引用块样式 */
+.message-text :deep(blockquote) {
+  margin: 8px 0;
+  padding: 8px 16px;
+  border-left: 4px solid var(--primary-color, #2196f3);
+  background: var(--blockquote-bg, #f8f9fa);
+  color: var(--text-secondary, #666);
+  border-radius: 0 4px 4px 0;
+}
+
+.message-text :deep(blockquote p) {
+  margin: 4px 0;
+}
+
+/* Markdown 代码块样式 */
+.message-text :deep(pre) {
+  background: var(--code-bg, #1e1e1e);
+  padding: 12px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+  position: relative;
+}
+
+.message-text :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  color: #d4d4d4;
+  font-size: 13px;
+  line-height: 1.5;
+  display: block;
+}
+
+/* 行内代码样式 */
 .message-text :deep(code) {
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
 }
 
@@ -682,6 +894,74 @@ defineExpose({
   background: var(--code-bg, #f0f0f0);
   padding: 2px 6px;
   border-radius: 4px;
+  color: var(--code-color, #d63384);
+}
+
+/* Markdown 表格样式 */
+.message-text :deep(table) {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+  font-size: 13px;
+}
+
+.message-text :deep(th),
+.message-text :deep(td) {
+  border: 1px solid var(--border-color, #e0e0e0);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.message-text :deep(th) {
+  background: var(--table-header-bg, #f5f5f5);
+  font-weight: 600;
+}
+
+.message-text :deep(tr:nth-child(even)) {
+  background: var(--table-row-alt-bg, #fafafa);
+}
+
+/* Markdown 水平分割线样式 */
+.message-text :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  margin: 16px 0;
+}
+
+/* Markdown 链接样式 */
+.message-text :deep(a) {
+  color: var(--primary-color, #2196f3);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.message-text :deep(a:hover) {
+  border-bottom-color: var(--primary-color, #2196f3);
+}
+
+/* Markdown 图片样式 */
+.message-text :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+/* Markdown 删除线样式 */
+.message-text :deep(del),
+.message-text :deep(s) {
+  color: var(--text-secondary, #666);
+  text-decoration: line-through;
+}
+
+/* Markdown 强调和加粗样式 */
+.message-text :deep(strong) {
+  font-weight: 600;
+}
+
+.message-text :deep(em) {
+  font-style: italic;
 }
 
 .message-time {
@@ -992,5 +1272,163 @@ defineExpose({
   height: 20px;
   color: var(--text-secondary, #666);
   transition: color 0.2s;
+}
+
+/* ==================== Tool 消息样式 ==================== */
+.message.tool {
+  justify-content: flex-start;  /* 左对齐 */
+}
+
+.tool-message-card {
+  background: var(--tool-card-bg, #f8f9fa);
+  border: 1px solid var(--tool-card-border, #e9ecef);
+  border-radius: 12px;
+  padding: 10px 14px;
+  width: 50%;  /* 固定宽度为 chatbox 的一半 */
+  max-width: 50%;
+  min-width: 300px;  /* 最小宽度保证可读性 */
+  font-size: 13px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.tool-message-card.expanded {
+  background: var(--tool-card-expanded-bg, #fff);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tool-name {
+  font-weight: 500;
+  color: var(--text-primary, #333);
+  font-family: 'Consolas', 'Monaco', monospace;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-status {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tool-status.success {
+  color: var(--success-color, #4caf50);
+}
+
+.tool-status.error {
+  color: var(--error-color, #f44336);
+}
+
+.tool-duration {
+  font-size: 10px;
+  color: var(--text-hint, #999);
+  background: var(--chip-bg, #e8e8e8);
+  padding: 2px 6px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.tool-expand-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary, #666);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.tool-expand-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tool-expand-btn.expanded {
+  transform: rotate(180deg);
+}
+
+.tool-details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color, #e8e8e8);
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tool-section {
+  margin-bottom: 10px;
+}
+
+.tool-section:last-child {
+  margin-bottom: 0;
+}
+
+.tool-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #666);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+
+/* Tool context 样式 */
+.tool-section.context-section {
+  margin-bottom: 12px;
+}
+
+.tool-context-text {
+  background: var(--tool-context-bg, #f0f7ff);
+  border-left: 3px solid var(--primary-color, #2196f3);
+  border-radius: 4px;
+  padding: 8px 12px;
+  color: var(--text-primary, #333);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.tool-section-content {
+  background: var(--code-bg, #1e1e1e);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #d4d4d4;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
 }
 </style>

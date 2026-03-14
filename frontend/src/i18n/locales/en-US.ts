@@ -26,6 +26,7 @@ export default {
     copyFailed: 'Copy failed',
     none: 'None',
     seconds: 'seconds',
+    reset: 'Reset',
   },
 
   // Navigation
@@ -69,8 +70,18 @@ export default {
     timeMinutesAgo: '{n} min ago',
     timeYesterday: 'Yesterday',
     timeDaysAgo: '{n} days ago',
+    // Tool messages
+    toolArguments: 'Arguments',
+    toolResult: 'Result',
+    toolContext: 'Context',
     uploadImage: 'Upload image',
     selectModel: 'Select Model',
+    // Task mode
+    exitTaskMode: 'Click to exit task mode',
+    selectDirectory: 'Please select a directory in the right panel to save conversation history',
+    noDirectory: 'No directory selected',
+    commandHint: 'Type / for shortcuts, or describe what you want to do...',
+    connectionLost: 'Connection lost, reconnecting. Please try again later.',
   },
 
   // Debug panel
@@ -215,6 +226,10 @@ export default {
     frequencyPenaltyHint: 'Reduces repetition of frequent words, -2 to 2, default 0',
     presencePenalty: 'Presence Penalty',
     presencePenaltyHint: 'Encourages discussing new topics, -2 to 2, default 0',
+    // Tool Call Configuration
+    toolCallConfig: 'Tool Call Configuration',
+    maxToolRoundsPlaceholder: 'Leave empty for system default',
+    maxToolRoundsExpertHint: 'Limit the maximum rounds of tool calls in a single conversation. Leave empty to use system default.',
     deleteExpertConfirm: 'Are you sure you want to delete expert "{name}"?',
     select: 'Select',
     selected: 'Selected',
@@ -470,6 +485,10 @@ export default {
     skillCallTimeoutHint: 'Maximum wait time for a single skill call (seconds)',
     remoteLlmTimeout: 'Remote LLM Timeout',
     remoteLlmTimeoutHint: 'Maximum wait time for remote LLM service calls (seconds)',
+    // Tool Config
+    toolConfig: 'Tool Configuration',
+    maxToolRounds: 'Max Tool Call Rounds',
+    maxToolRoundsHint: 'Maximum tool call rounds per LLM request to prevent infinite loops (1-50, default 20)',
     // General Config
     generalConfig: 'General Config',
     // Package Whitelist

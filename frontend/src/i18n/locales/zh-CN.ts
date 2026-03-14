@@ -28,6 +28,7 @@ export default {
     refresh: '刷新',
     none: '无',
     seconds: '秒',
+    reset: '重置',
   },
 
   // 导航
@@ -71,8 +72,18 @@ export default {
     timeMinutesAgo: '{n}分钟前',
     timeYesterday: '昨天',
     timeDaysAgo: '{n}天前',
+    // Tool 消息
+    toolArguments: '参数',
+    toolResult: '结果',
+    toolContext: '上下文',
     uploadImage: '上传图片',
     selectModel: '选择模型',
+    // 任务模式
+    exitTaskMode: '点击退出任务模式',
+    selectDirectory: '请在右侧面板选择目录以保存对话记录',
+    noDirectory: '未选择目录',
+    commandHint: '输入 / 查看快捷指令，或描述你想做什么...',
+    connectionLost: '连接已断开，正在重连中，请稍后重试',
   },
 
   // 调试面板
@@ -217,6 +228,10 @@ export default {
     frequencyPenaltyHint: '降低重复词汇的出现频率，-2 到 2，默认 0',
     presencePenalty: '存在惩罚 (Presence Penalty)',
     presencePenaltyHint: '鼓励讨论新话题，-2 到 2，默认 0',
+    // 工具调用配置
+    toolCallConfig: '工具调用配置',
+    maxToolRoundsPlaceholder: '留空使用系统默认',
+    maxToolRoundsExpertHint: '限制 AI 在单次对话中调用工具的最大轮数，留空则使用系统默认设置',
     deleteExpertConfirm: '确定要删除专家"{name}"吗？',
     select: '选择',
     selected: '已选择',
@@ -451,6 +466,10 @@ export default {
     skillCallTimeoutHint: '单个技能调用的最大等待时间（秒）',
     remoteLlmTimeout: '远程 LLM 超时',
     remoteLlmTimeoutHint: '远程 LLM 服务调用的最大等待时间（秒）',
+    // 工具调用配置
+    toolConfig: '工具调用配置',
+    maxToolRounds: '最大工具调用轮数',
+    maxToolRoundsHint: 'LLM 单次请求中最多执行的工具调用轮数，防止无限循环（1-50，默认 20）',
     // 通用配置
     generalConfig: '通用配置',
     // 包白名单配置

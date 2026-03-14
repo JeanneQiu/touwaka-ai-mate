@@ -1,6 +1,6 @@
 # 代码审计清单
 
-> **最后更新**: 2026-03-12
+> **最后更新**: 2026-03-13
 > **来源**: `docs/core/SOUL.md` 自我代码审计清单
 
 ---
@@ -97,6 +97,7 @@ ctx.success(buildPaginatedResponse(rows, count, pagination));
 | **资源泄漏** | 连接/文件/定时器是否正确释放？ |
 | **N+1 查询** | 循环中有数据库调用？改用批量查询 |
 | **路由顺序** | 动态路由 `/:id` 是否在静态路由之后？ |
+| **ID 类型匹配** | 自增 ID 字段是否误用手动指定（如 `Utils.newID()`）？检查 Model 定义中 `autoIncrement: true` 的字段 |
 
 ### 前端错误处理专项检查
 
@@ -146,7 +147,67 @@ grep -rn "// 错误已在" frontend/src/views/ frontend/src/components/
 
 ---
 
+## 第 3.5 步：系统复杂度审计
+
+> **来源**：Issue #143 滚动条乱跑问题修复经验
+> **核心思想**：新功能开发和Bug修复不可避免会引入复杂性，必须审查是否让系统变得更混乱
+
+### 审计原则
+
+| 原则 | 说明 |
+|------|------|
+| **熵增警惕** | 每次修改后检查：系统是更清晰了还是更混乱了？ |
+| **简化优先** | 复杂问题优先考虑简化现有设计，而非添加更多逻辑 |
+| **单一职责** | 一个模块/状态只做一件事，避免功能蔓延 |
+
+### 检查清单
+
+**状态复杂度**：
+- [ ] 新增状态变量是否与现有状态职责重叠？
+- [ ] 状态之间是否存在交叉判断、相互影响？
+- [ ] 是否可以用单一状态替代多个状态？
+
+**逻辑复杂度**：
+- [ ] 新增逻辑是否让现有流程更难理解？
+- [ ] 是否存在多层嵌套的条件判断？
+- [ ] 是否有重复或相似的逻辑可以抽取？
+
+**模块复杂度**：
+- [ ] 单个文件/函数是否过长（>300行/>50行）？
+- [ ] 模块职责是否清晰？是否存在"上帝类"？
+- [ ] 是否需要拆分为更小的模块？
+
+### 重构信号
+
+| 信号 | 问题 | 行动 |
+|------|------|------|
+| 新增状态需与现有状态联动 | 状态耦合严重 | 合并或重新设计状态 |
+| 修复Bug需添加更多判断 | 逻辑腐化 | 重构而非打补丁 |
+| 无法快速理解代码流程 | 可读性差 | 简化/拆分/注释 |
+| 修改一处影响多处 | 耦合过高 | 解耦/职责分离 |
+
+### 实践案例
+
+**Issue #143 教训**：滚动控制引入多个状态变量（`isInitialLoad`、`userScrolledAway`、`scrollStabilizeTimer`等）导致状态冲突，最终简化为单一状态 `isUserAtBottom` 解决问题。
+
+**审查思路**：
+1. 发现问题 → 不急于添加逻辑
+2. 分析现有设计 → 找出复杂度根源
+3. 从基本需求出发 → 重新设计而非打补丁
+
+---
+
 ## 第四步：前后端契约检查
+
+### 新增字段完整性检查
+
+**新增数据库字段时，必须检查所有 CRUD 操作**：
+- [ ] `create` 方法是否处理新字段？
+- [ ] `update` 方法是否处理新字段？
+- [ ] `list`/`get` 方法的 `attributes` 是否包含新字段？
+- [ ] 前端 TypeScript 类型定义是否更新？
+
+### 分页响应格式
 
 **后端返回**：
 ```javascript
@@ -509,6 +570,62 @@ node tests/db-query.js skill_tools --where="skill_id='remote-llm'" --format=json
 
 # 检查是否有不必要的 package.json（只用内置模块的技能）
 ls data/skills/*/package.json
+```
+
+---
+
+## 第十步：数据库迁移检查
+
+### 迁移脚本规范
+
+**所有数据库迁移必须统一使用 `scripts/upgrade-database.js`，禁止创建独立的迁移脚本！**
+
+### 幂等性检查清单
+
+- [ ] 每个迁移项有 `check` 函数检查是否已应用
+- [ ] 使用 `safeExecute()` 捕获"已存在"类错误
+- [ ] 表创建使用 `CREATE TABLE IF NOT EXISTS`
+- [ ] 字段添加前检查 `hasColumn()`
+- [ ] 外键添加前检查 `hasForeignKey()`
+
+### 新增迁移项模板
+
+```javascript
+// 在 MIGRATIONS 数组末尾添加
+{
+  name: '表名.字段名 或 表名',
+  check: async (conn) => {
+    // 检查是否已存在（返回 true = 跳过迁移）
+    return await hasColumn(conn, 'table_name', 'column_name');
+    // 或检查表是否存在
+    return await hasTable(conn, 'table_name');
+  },
+  migrate: async (conn) => {
+    // 迁移逻辑
+    await conn.execute(`ALTER TABLE ...`);
+    // 使用 safeExecute 处理可能的重复错误
+    await safeExecute(conn, `CREATE INDEX ...`);
+  }
+},
+```
+
+### 外键约束检查
+
+- [ ] 新建表时检查是否需要外键约束
+- [ ] 外键命名规范：`fk_{表名}_{字段名}`（如 `fk_kb_owner`）
+- [ ] 外键删除行为：CASCADE / SET NULL / RESTRICT
+
+### 迁移后验证
+
+```bash
+# 执行迁移
+node scripts/upgrade-database.js
+
+# 重新生成模型
+node scripts/generate-models.js
+
+# 验证模型文件
+git diff server/models/
 ```
 
 ---

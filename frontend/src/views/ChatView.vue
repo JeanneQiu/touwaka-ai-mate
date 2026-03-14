@@ -1,46 +1,46 @@
 <template>
   <div class="chat-view">
-    <!-- 聊天头部 -->
-    <div class="chat-header">
-      <div class="expert-info">
-        <div
-          class="expert-avatar"
-          :style="currentExpert?.avatar_base64 ? { backgroundImage: `url(${currentExpert.avatar_base64})` } : {}"
-        >
-          <span v-if="!currentExpert?.avatar_base64">🤖</span>
-        </div>
-        <h2 class="expert-name">{{ currentExpert?.name || $t('chat.title') }}</h2>
-        <!-- skill-studio 显示模型选择器 -->
-        <ModelSelector
-          v-if="is_skill_studio"
-          v-model="selected_model_id"
-          class="model-selector"
-        />
-        <span v-else-if="currentModel" class="model-badge">{{ currentModel.name }}</span>
-        <!-- Task 模式状态 -->
-        <span
-          class="task-mode-tag"
-          :class="{ 'in-task': taskStore.currentTask, 'no-task': !taskStore.currentTask }"
-          @click="taskStore.currentTask && handleExitTaskMode()"
-          :title="taskStore.currentTask ? '点击退出任务模式' : '请在右侧面板选择目录以保存对话记录'"
-        >
-          <template v-if="taskStore.currentTask">
-            📁 {{ taskStore.currentTask.title }}
-            <span class="exit-icon">✕</span>
-          </template>
-          <template v-else>
-            ⚠️ 未选择目录
-          </template>
-        </span>
-      </div>
-    </div>
-
     <!-- 聊天主体 + 右侧面板（可拖拽调整） -->
     <div class="chat-body-wrapper">
       <Splitpanes @resize="handlePanelResize">
         <!-- 聊天主体 -->
         <Pane :size="chatPaneSize" class="chat-pane">
           <div class="chat-body">
+            <!-- 专家信息面板（对话 box 顶部） -->
+            <div class="chat-info-panel" v-if="currentExpertId">
+              <div class="expert-info">
+                <div
+                  class="expert-avatar"
+                  :style="currentExpert?.avatar_base64 ? { backgroundImage: `url(${currentExpert.avatar_base64})` } : {}"
+                >
+                  <span v-if="!currentExpert?.avatar_base64">🤖</span>
+                </div>
+                <h2 class="expert-name">{{ currentExpert?.name || $t('chat.title') }}</h2>
+                <!-- skill-studio 显示模型选择器 -->
+                <ModelSelector
+                  v-if="is_skill_studio"
+                  v-model="selected_model_id"
+                  class="model-selector"
+                />
+                <span v-else-if="currentModel" class="model-badge">{{ currentModel.name }}</span>
+                <!-- Task 模式状态 -->
+                <span
+                  class="task-mode-tag"
+                  :class="{ 'in-task': taskStore.currentTask, 'no-task': !taskStore.currentTask }"
+                  @click="taskStore.currentTask && handleExitTaskMode()"
+                  :title="taskStore.currentTask ? $t('chat.exitTaskMode') : $t('chat.selectDirectory')"
+                >
+                  <template v-if="taskStore.currentTask">
+                    📁 {{ taskStore.currentTask.title }}
+                    <span class="exit-icon">✕</span>
+                  </template>
+                  <template v-else>
+                    ⚠️ {{ $t('chat.noDirectory') }}
+                  </template>
+                </span>
+              </div>
+            </div>
+            
             <div class="chat-content" v-if="currentExpertId">
               <ChatWindow
                 ref="chatWindowRef"
@@ -51,7 +51,7 @@
                 :expert-avatar="currentExpert?.avatar_base64"
                 :expert-avatar-large="currentExpert?.avatar_large_base64"
                 :show-command-hints="is_skill_studio"
-                :custom-placeholder="is_skill_studio ? '输入 / 查看快捷指令，或描述你想做什么...' : undefined"
+                :custom-placeholder="is_skill_studio ? $t('chat.commandHint') : undefined"
                 @send="handleSendMessage"
                 @retry="handleRetry"
                 @load-more="loadMoreMessages"
@@ -137,6 +137,37 @@ const chatWindowRef = ref<InstanceType<typeof ChatWindow> | null>(null)
 const isSending = ref(false)
 const currentAssistantMessage = ref<Message | null>(null)
 
+// 安全超时：防止 isSending 永久为 true（SSE 流异常终止时）
+let sendingTimeout: ReturnType<typeof setTimeout> | null = null
+const SENDING_TIMEOUT_MS = 5 * 60 * 1000  // 5 分钟超时（考虑到复杂工具调用可能耗时较长）
+
+// 清除发送超时
+const clearSendingTimeout = () => {
+  if (sendingTimeout) {
+    clearTimeout(sendingTimeout)
+    sendingTimeout = null
+  }
+}
+
+// 设置发送超时保护
+const setSendingTimeoutProtection = () => {
+  clearSendingTimeout()
+  sendingTimeout = setTimeout(() => {
+    if (isSending.value) {
+      console.warn('[ChatView] Sending timeout reached, resetting isSending to false')
+      isSending.value = false
+      if (currentAssistantMessage.value) {
+        chatStore.updateMessageContent(
+          currentAssistantMessage.value.id,
+          currentAssistantMessage.value.content || '',
+          'timeout'
+        )
+        currentAssistantMessage.value = null
+      }
+    }
+  }, SENDING_TIMEOUT_MS)
+}
+
 // 使用新的 SSE composable
 const {
   isConnected,
@@ -219,10 +250,43 @@ const loadMoreMessages = async () => {
   await chatStore.loadMoreMessages()
 }
 
+// 记录上一次收到的最新消息 ID，用于避免重复拉取
+const lastKnownMessageId = ref<string | null>(null)
+
 // 处理 SSE 事件
 const handleSSEEvent = async (event: SSEEvent) => {
-  // 心跳事件已在 useSSE 中处理
+  // 心跳事件处理
   if (event.event === 'heartbeat') {
+    try {
+      const data = JSON.parse(event.data)
+      const serverLatestMessageId = data.latest_message_id
+      
+      // 如果服务端有消息 ID，且与本地已知的不同
+      if (serverLatestMessageId && serverLatestMessageId !== lastKnownMessageId.value) {
+        // 获取本地最新消息 ID
+        const localMessages = chatStore.sortedMessages
+        const lastMessage = localMessages.length > 0 ? localMessages[localMessages.length - 1] : undefined
+        const localLatestId = lastMessage?.id ?? null
+        
+        // 如果服务端消息 ID 与本地最新消息 ID 不同，说明有新消息
+        if (serverLatestMessageId !== localLatestId) {
+          console.log('检测到新消息，主动拉取:', {
+            serverLatest: serverLatestMessageId,
+            localLatest: localLatestId,
+          })
+          
+          // 刷新消息列表（只拉取第一页最新消息）
+          if (currentExpertId.value) {
+            await chatStore.loadMessagesByExpert(currentExpertId.value, 1)
+          }
+        }
+        
+        // 更新已知的消息 ID
+        lastKnownMessageId.value = serverLatestMessageId
+      }
+    } catch (e) {
+      console.error('Parse heartbeat error:', e)
+    }
     return
   }
 
@@ -299,24 +363,31 @@ const handleSSEEvent = async (event: SSEEvent) => {
         }
         break
 
-      case 'tool_results':
-        console.log('Tool results:', data)
-        // 在当前消息中显示工具执行结果摘要
-        if (currentAssistantMessage.value && data.results) {
-          const resultSummary = data.results.map((r: any) => {
-            const name = r.toolName || 'unknown'
-            const success = r.success ? '✅' : '❌'
-            return `${success} ${name}`
-          }).join('\n')
+      case 'tool_result':
+        // 单个工具执行完成，实时显示结果
+        console.log('Tool result:', data)
+        if (currentAssistantMessage.value && data.result) {
+          const r = data.result
+          const name = r.toolName || 'unknown'
+          const success = r.success ? '✅' : '❌'
+          const duration = r.duration ? ` (${r.duration}ms)` : ''
+          const resultText = `${success} ${name}${duration}\n`
           
           chatStore.updateMessageContent(
             currentAssistantMessage.value.id,
-            currentAssistantMessage.value.content + `\n${resultSummary}\n\n---\n`
+            currentAssistantMessage.value.content + `\n${resultText}`
           )
         }
         break
 
+      case 'tool_results':
+        // 所有工具执行完成（批量结果，保留向后兼容）
+        console.log('Tool results:', data)
+        // 不再重复显示，因为 tool_result 已经实时显示了
+        break
+
       case 'complete':
+        console.log('SSE complete event received:', data)
         if (currentAssistantMessage.value) {
           if (data.usage) {
             chatStore.updateMessageMetadata(currentAssistantMessage.value.id, {
@@ -358,10 +429,13 @@ const handleSSEEvent = async (event: SSEEvent) => {
           
           currentAssistantMessage.value = null
         }
+        console.log('[ChatView] Setting isSending to false on complete event')
+        clearSendingTimeout()
         isSending.value = false
         break
 
       case 'error':
+        console.log('SSE error event received:', data)
         if (currentAssistantMessage.value) {
           chatStore.updateMessageContent(
             currentAssistantMessage.value.id,
@@ -370,6 +444,8 @@ const handleSSEEvent = async (event: SSEEvent) => {
           )
           currentAssistantMessage.value = null
         }
+        console.log('[ChatView] Setting isSending to false on error event')
+        clearSendingTimeout()
         isSending.value = false
         break
 
@@ -389,6 +465,13 @@ const handleSSEEvent = async (event: SSEEvent) => {
     }
   } catch (e) {
     console.error('Parse SSE event error:', e)
+    // 解析错误时也要重置 isSending，防止输入框永久禁用
+    if (event.event === 'complete' || event.event === 'error') {
+      console.log('[ChatView] Setting isSending to false after parse error')
+      clearSendingTimeout()
+      isSending.value = false
+      currentAssistantMessage.value = null
+    }
   }
 }
 
@@ -450,7 +533,7 @@ const handleSendMessage = async (content: string) => {
       chatStore.addLocalMessage({
         expert_id,
         role: 'assistant',
-        content: '连接已断开，正在重连中，请稍后重试',
+        content: t('chat.connectionLost'),
         status: 'error',
       })
       return
@@ -479,6 +562,7 @@ const handleSendMessage = async (content: string) => {
   })
 
   isSending.value = true
+  setSendingTimeoutProtection()  // 设置超时保护
 
   try {
     // 构建消息参数
@@ -519,6 +603,7 @@ const handleSendMessage = async (content: string) => {
       )
       currentAssistantMessage.value = null
     }
+    clearSendingTimeout()
     isSending.value = false
   }
 }
@@ -563,6 +648,7 @@ const handleStopGenerate = async () => {
     currentAssistantMessage.value = null
   }
 
+  clearSendingTimeout()
   isSending.value = false
 
   // 调用后端停止 API
@@ -592,6 +678,9 @@ const initChat = async (expertId: string) => {
   connectToExpert(expertId)
 }
 
+// 从路由获取 taskId
+const currentTaskId = computed(() => route.params.taskId as string | undefined)
+
 // 监听路由参数变化（expertId）
 watch(
   () => route.params.expertId as string,
@@ -609,6 +698,39 @@ watch(
       // 没有 expertId，清除聊天状态
       chatStore.clearChat()
       await disconnectSSE()
+    }
+  },
+  { immediate: true }
+)
+
+// 监听路由参数变化（taskId）- 用于从 URL 恢复任务状态
+watch(
+  currentTaskId,
+  async (taskId) => {
+    console.log('Route taskId changed:', taskId)
+    
+    // 必须等用户登录后再处理
+    if (!userStore.isLoggedIn) {
+      console.log('User not logged in, skip task handling')
+      return
+    }
+
+    if (taskId && taskStore.currentTask?.id !== taskId) {
+      // URL 中有 taskId，但当前任务不匹配，需要加载任务
+      console.log('Loading task from URL:', taskId)
+      const success = await taskStore.loadAndEnterTask(taskId)
+      if (!success) {
+        // 任务加载失败（可能不存在或无权限），清除 URL 中的 taskId
+        console.warn('Failed to load task, removing taskId from URL')
+        router.replace({
+          name: 'chat',
+          params: { expertId: currentExpertId.value }
+        })
+      }
+    } else if (!taskId && taskStore.currentTask) {
+      // URL 中没有 taskId，但当前有任务，退出任务模式
+      console.log('No taskId in URL, exiting task mode')
+      taskStore.exitTask()
     }
   },
   { immediate: true }
@@ -646,6 +768,13 @@ watch(
 // 退出任务模式
 const handleExitTaskMode = () => {
   taskStore.exitTask()
+  // 清除 URL 中的 taskId
+  if (route.params.taskId) {
+    router.replace({
+      name: 'chat',
+      params: { expertId: currentExpertId.value }
+    })
+  }
 }
 
 onMounted(async () => {
@@ -656,6 +785,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // 清理超时定时器
+  clearSendingTimeout()
   // 清理 SSE 连接（useSSE 会自动处理）
   disconnectSSE()
 })
@@ -669,14 +800,49 @@ onUnmounted(() => {
   background: var(--main-bg, #fff);
 }
 
-.chat-header {
+.chat-body-wrapper {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex: 1;
+  overflow: hidden;
+}
+
+.chat-pane {
+  height: 100%;
+}
+
+.panel-pane {
+  height: 100%;
+  padding: 16px;
+  padding-left: 6px;
+}
+
+.chat-body {
+  height: 100%;
+  overflow: hidden;
+  padding: 16px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 专家信息面板样式 - 上圆角+下直角，与 chatbox 融为一体 */
+.chat-info-panel {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color, #e0e0e0);
-  background: var(--header-bg, #fff);
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
   flex-shrink: 0;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-bottom: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .expert-info {
@@ -716,57 +882,6 @@ onUnmounted(() => {
 
 .model-selector {
   margin-left: 8px;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.btn-toggle-panel {
-  padding: 6px 12px;
-  background: var(--secondary-bg, #f5f5f5);
-  border: 1px solid var(--border-color, #e0e0e0);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--text-secondary, #666);
-  cursor: pointer;
-}
-
-.btn-toggle-panel:hover {
-  background: var(--hover-bg, #e8e8e8);
-}
-
-.chat-body-wrapper {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-.chat-pane {
-  height: 100%;
-}
-
-.panel-pane {
-  height: 100%;
-}
-
-.chat-body {
-  height: 100%;
-  overflow: hidden;
-  padding: 16px;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-content {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
 }
 
 .no-expert-selected {

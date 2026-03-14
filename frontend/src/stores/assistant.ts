@@ -211,9 +211,10 @@ export const useAssistantStore = defineStore('assistant', () => {
     try {
       await assistantApi.archiveRequest(requestId)
       // 从列表中移除或更新
-      const request = requests.value.find(r => r.request_id === requestId)
-      if (request) {
-        request.is_archived = 1
+      const index = requests.value.findIndex(r => r.request_id === requestId)
+      if (index !== -1 && requests.value[index]) {
+        const request = requests.value[index]
+        requests.value[index] = { ...request, is_archived: 1 }
       }
     } catch (e) {
       console.error('Failed to archive request:', e)
@@ -225,9 +226,10 @@ export const useAssistantStore = defineStore('assistant', () => {
   async function unarchiveRequest(requestId: string) {
     try {
       await assistantApi.unarchiveRequest(requestId)
-      const request = requests.value.find(r => r.request_id === requestId)
-      if (request) {
-        request.is_archived = 0
+      const index = requests.value.findIndex(r => r.request_id === requestId)
+      if (index !== -1 && requests.value[index]) {
+        const request = requests.value[index]
+        requests.value[index] = { ...request, is_archived: 0 }
       }
     } catch (e) {
       console.error('Failed to unarchive request:', e)

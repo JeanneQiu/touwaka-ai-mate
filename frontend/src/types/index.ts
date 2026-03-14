@@ -42,10 +42,10 @@ export interface Topic {
 }
 
 // 消息角色
-export type MessageRole = 'user' | 'assistant' | 'system'
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
 // 消息状态
-export type MessageStatus = 'pending' | 'streaming' | 'completed' | 'error' | 'cancelled' | 'stopped' | 'stopped'
+export type MessageStatus = 'pending' | 'streaming' | 'completed' | 'error' | 'cancelled' | 'stopped' | 'timeout'
 
 // 消息类型
 // 核心设计：消息按 expert + user 组织，topic_id 只是对话历史的阶段性总结标记
@@ -65,6 +65,7 @@ export interface Message {
 
 // 消息元数据
 export interface MessageMetadata {
+  [key: string]: unknown  // 索引签名，支持动态属性
   tokens?: TokenUsage
   cost?: number
   latency?: number
@@ -72,6 +73,21 @@ export interface MessageMetadata {
   provider?: string
   error?: string
   cached?: boolean
+  tool_calls?: string | ToolCallData  // 工具调用信息（JSON 字符串或对象）
+}
+
+// 工具调用数据
+export interface ToolCallData {
+  [key: string]: unknown
+  tool_call_id?: string
+  name?: string
+  tool_name?: string
+  content?: string
+  success?: boolean
+  duration?: number
+  timestamp?: string
+  arguments?: Record<string, unknown>
+  result?: unknown
 }
 
 // Token 使用情况
@@ -158,6 +174,8 @@ export interface Expert {
   top_p?: number                // 核采样，默认 1.0
   frequency_penalty?: number    // 频率惩罚，默认 0.0
   presence_penalty?: number     // 存在惩罚，默认 0.0
+  // 工具调用配置
+  max_tool_rounds?: number | null  // 最大工具调用轮数（NULL表示使用系统默认，范围 1-50）
   // 头像
   avatar_base64?: string        // 小头像 Base64（日常使用）
   avatar_large_base64?: string  // 大头像 Base64（对话框背景）
